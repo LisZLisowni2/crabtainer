@@ -2,7 +2,7 @@ use crate::engine::rockerfile::{Instruction, Rockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
-use crate::engine::paths::RockerPaths;
+use crate::engine::paths::RustockerPaths;
 
 struct LayoutOpts {
     rootfs: PathBuf,
@@ -18,12 +18,12 @@ pub async fn build_image(rockerfile_str: String, output_layout_name: String) -> 
     println!("[BUILDER] Building an layout: {}", output_layout_name);
     println!("[BUILDER] Create a dir for layout: {}", output_layout_name);
 
-    let _ = std::fs::create_dir_all(RockerPaths::layout_store_dir().join(&output_layout_name));
+    let _ = std::fs::create_dir_all(RustockerPaths::layout_store_dir().join(&output_layout_name));
 
     let mut count = 0;
     let steps = rockerfile.instructions.len();
     let mut opts = LayoutOpts {
-        rootfs: RockerPaths::layout_store_dir().join(&output_layout_name).join("rootfs"),
+        rootfs: RustockerPaths::layout_store_dir().join(&output_layout_name).join("rootfs"),
         cmd: vec![]
     };
     

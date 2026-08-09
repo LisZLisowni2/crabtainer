@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use tokio::process::Command;
-use crate::engine::paths::RockerPaths;
+use crate::engine::paths::RustockerPaths;
 
 pub async fn from_image(base_image: &String, output_layout_name: &String) -> Result<(), String> {
-    let files = std::fs::read_dir(RockerPaths::image_store_dir()).map_err(|e| format!("Error reading directory: {}", e))?;
+    let files = std::fs::read_dir(RustockerPaths::image_store_dir()).map_err(|e| format!("Error reading directory: {}", e))?;
 
     let mut found = false;
     let mut found_file: PathBuf = PathBuf::new();
@@ -24,7 +24,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     println!(" => [FROM] Extract rootfs from {} to {} rootfs", base_image, output_layout_name);
 
     let status = Command::new("tar")
-        .args(["-xzf", &found_file.to_string_lossy(), "-C", RockerPaths::layout_store_dir().join(output_layout_name).join("rootfs").to_str().unwrap()])
+        .args(["-xzf", &found_file.to_string_lossy(), "-C", RustockerPaths::layout_store_dir().join(output_layout_name).join("rootfs").to_str().unwrap()])
         .status()
         .await
         .map_err(|e| format!(" => [FROM] Error spwaning tar: {}", e))?;

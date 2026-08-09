@@ -2,12 +2,12 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use tokio::fs::{File};
 use tokio::io::AsyncWriteExt;
-use crate::engine::paths::RockerPaths;
+use crate::engine::paths::RustockerPaths;
 
 pub async fn download_image_if_missing(url: &str, alias: &str) -> Result<std::path::PathBuf, String> {
-    RockerPaths::init_system_dirs()?;
+    RustockerPaths::init_system_dirs()?;
 
-    let storage_dir = RockerPaths::image_store_dir();
+    let storage_dir = RustockerPaths::image_store_dir();
 
     let target_path = storage_dir.join(format!("{}.tar.gz", alias));
 

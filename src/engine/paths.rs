@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-pub struct RockerPaths;
+pub struct RustockerPaths;
 
-impl RockerPaths {
+impl RustockerPaths {
     pub fn base_dir() -> PathBuf {
         PathBuf::from("/var/rocker")
     }

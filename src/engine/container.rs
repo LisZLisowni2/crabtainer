@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use rand::{Rng, RngExt};
-use crate::engine::paths::RockerPaths;
+use crate::engine::paths::RustockerPaths;
 
 pub struct ContainerOptions {
     pub layout_name: String,
@@ -26,7 +26,7 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     println!("[HOST] Running a container...");
 
-    let layout_dir = RockerPaths::layout_store_dir().join(&opts.layout_name);
+    let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
     if !layout_dir.exists() {
         return Err(format!(
             "Layout '{}' doesn't exist! Build it first using 'rocker build'.",
@@ -36,7 +36,7 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let container_id = generate_container_id();
 
-    let container_workdir = RockerPaths::runtime_dir()
+    let container_workdir = RustockerPaths::runtime_dir()
         .join(&container_id);
 
     let upper_dir = container_workdir.join("upper");

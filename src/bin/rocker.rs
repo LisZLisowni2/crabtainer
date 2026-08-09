@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
 use nix::libc::exit;
-use Rocker::engine::container::{run_container, ContainerOptions};
-use Rocker::engine::builder::build_image;
+use Rustocker::engine::container::{run_container, ContainerOptions};
+use Rustocker::engine::builder::build_image;
 
 #[derive(Parser)]
-#[command(name = "rocker")]
-#[command(about = "Rocker - Rust's version of Docker")]
+#[command(name = "rustocker")]
+#[command(about = "Rustocker - A lightweight container runtime built from scratch in Rust")]
 struct Cli {
     #[command(subcommand)]
     command: Commands
@@ -50,7 +50,7 @@ async fn main() {
             build_image(file, tag).await.unwrap();
         },
         Commands::Images => {
-            let store = Rocker::engine::paths::RockerPaths::image_store_dir();
+            let store = Rustocker::engine::paths::RustockerPaths::image_store_dir();
             println!("{:<20} {:<15}", "ALIAS", "SIZE");
             println!("{}", "-".repeat(38));
             let status = std::fs::read_dir(&store);
@@ -65,7 +65,7 @@ async fn main() {
             }
         },
         Commands::Layouts => {
-            let store = Rocker::engine::paths::RockerPaths::layout_store_dir();
+            let store = Rustocker::engine::paths::RustockerPaths::layout_store_dir();
             println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
             println!("{}", "-".repeat(38));
 
