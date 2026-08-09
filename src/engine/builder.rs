@@ -1,18 +1,32 @@
 use crate::engine::rockerfile::{Instruction, Rockerfile};
-use crate::engine::download::download_image_if_missing;
-use std::path::Path;
+use crate::engine::instructions::download::download_image_if_missing;
+use crate::engine::instructions::from::from_image;
+use std::path::{Path, PathBuf};
+use crate::engine::paths::RockerPaths;
 
-pub async fn build_image(rockerfile_str: String, output_image_name: String) -> Result<(), String> {
+struct LayoutOpts {
+    rootfs: PathBuf,
+    cmd: Vec<String>,
+}
+
+pub async fn build_image(rockerfile_str: String, output_layout_name: String) -> Result<(), String> {
     let rockerfile_path = Path::new(rockerfile_str.as_str());
 
     let rockerfile = Rockerfile::parse_from_file(rockerfile_path)
         .expect("Error parsing rockerfile");
 
-    println!("[BUILDER] Building an image: {}", output_image_name);
+    println!("[BUILDER] Building an layout: {}", output_layout_name);
+    println!("[BUILDER] Create a dir for layout: {}", output_layout_name);
+
+    let _ = std::fs::create_dir_all(RockerPaths::layout_store_dir().join(&output_layout_name));
 
     let mut count = 0;
     let steps = rockerfile.instructions.len();
-
+    let mut opts = LayoutOpts {
+        rootfs: RockerPaths::layout_store_dir().join(&output_layout_name).join("rootfs"),
+        cmd: vec![]
+    };
+    
     for instruction in rockerfile.instructions {
         count += 1;
         match instruction {
@@ -22,7 +36,7 @@ pub async fn build_image(rockerfile_str: String, output_image_name: String) -> R
             },
             Instruction::From(base_image) => {
                 println!(" => [{}/{}] FROM {}", count, steps, base_image);
-                // TODO: Read from local cache
+                from_image(&base_image, &output_layout_name).await?;
             },
             Instruction::Copy {src, dst} => {
                 println!(" => [{}/{}] COPY {} to {}", count, steps, src, dst);
@@ -34,7 +48,7 @@ pub async fn build_image(rockerfile_str: String, output_image_name: String) -> R
             },
             Instruction::Cmd(cmd) => {
                 println!(" => [{}/{}] CMD {:?}", count, steps, cmd);
-                // TODO: Save metadata (how to run an image in 'rocker run')
+                opts.cmd = cmd;
             }
         }
     }

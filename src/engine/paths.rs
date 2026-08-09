@@ -17,7 +17,7 @@ impl RockerPaths {
     }
 
     pub fn runtime_dir() -> PathBuf {
-        std::env::temp_dir().join("rocker").join("containers")
+        Self::base_dir().join("containers")
     }
 
     pub fn init_system_dirs() -> Result<(), String> {

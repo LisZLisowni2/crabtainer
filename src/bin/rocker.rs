@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use nix::libc::exit;
 use Rocker::engine::container::{run_container, ContainerOptions};
 use Rocker::engine::builder::build_image;
 
@@ -15,10 +16,11 @@ enum Commands {
     Run {
         layout: String,
 
+        #[arg(default_value = "")]
+        command: String,
+
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
-
-        command: String,
     },
     Build {
         #[arg(short, long, default_value = "Rockerfile")]
@@ -34,6 +36,10 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    if !is_root::is_root() {
+        eprintln!("You have to run this command with sudo privileges");
+        return;
+    }
 
     match cli.command {
         Commands::Run { layout, command, args } => {

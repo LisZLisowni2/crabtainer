@@ -43,9 +43,9 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
     let work_dir = container_workdir.join("work");
     let merged_rootfs = container_workdir.join("rootfs");
 
-    fs::create_dir_all(&upper_dir).map_err(|e| format!("Nie udało się utworzyć upperdir: {}", e))?;
-    fs::create_dir_all(&work_dir).map_err(|e| format!("Nie udało się utworzyć workdir: {}", e))?;
-    fs::create_dir_all(&merged_rootfs).map_err(|e| format!("Nie udało się utworzyć rootfs: {}", e))?;
+    fs::create_dir_all(&upper_dir).map_err(|e| format!("Upperdir failed to create: {}", e))?;
+    fs::create_dir_all(&work_dir).map_err(|e| format!("Workdir failed to create: {}", e))?;
+    fs::create_dir_all(&merged_rootfs).map_err(|e| format!("Rootfs failed to create: {}", e))?;
 
     let overlay_opts = format!(
         "lowerdir={},upperdir={},workdir={}",
@@ -54,7 +54,7 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
         work_dir.to_str().unwrap()
     );
 
-    mount(
+    let _ = mount(
         Some("overlay"),
         &merged_rootfs,
         Some("overlay"),
