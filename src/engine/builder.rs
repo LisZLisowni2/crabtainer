@@ -1,4 +1,4 @@
-use crate::engine::rockerfile::{Instruction, Rockerfile};
+use crate::engine::rustockerfile::{Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
@@ -9,25 +9,30 @@ struct LayoutOpts {
     cmd: Vec<String>,
 }
 
-pub async fn build_image(rockerfile_str: String, output_layout_name: String) -> Result<(), String> {
-    let rockerfile_path = Path::new(rockerfile_str.as_str());
+pub async fn build_image(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
+    let rustocker_path = Path::new(rustocker_file.as_str());
 
-    let rockerfile = Rockerfile::parse_from_file(rockerfile_path)
-        .expect("Error parsing rockerfile");
+    let rustocker = Rustockerfile::parse_from_file(rustocker_path)
+        .expect("Error parsing rustocker");
 
     println!("[BUILDER] Building an layout: {}", output_layout_name);
     println!("[BUILDER] Create a dir for layout: {}", output_layout_name);
+    
+    let output_path = RustockerPaths::layout_store_dir().join(&output_layout_name);
 
-    let _ = std::fs::create_dir_all(RustockerPaths::layout_store_dir().join(&output_layout_name));
+    if std::fs::metadata(&output_path).is_ok() {
+        println!("[WARN] Directory {} already exists!", output_layout_name);
+    }
+    let _ = std::fs::create_dir_all(&output_path);
 
     let mut count = 0;
-    let steps = rockerfile.instructions.len();
+    let steps = rustocker.instructions.len();
     let mut opts = LayoutOpts {
-        rootfs: RustockerPaths::layout_store_dir().join(&output_layout_name).join("rootfs"),
+        rootfs: output_path.join("rootfs"),
         cmd: vec![]
     };
     
-    for instruction in rockerfile.instructions {
+    for instruction in rustocker.instructions {
         count += 1;
         match instruction {
             Instruction::Download {url, alias} => {
@@ -52,8 +57,8 @@ pub async fn build_image(rockerfile_str: String, output_layout_name: String) -> 
             }
         }
     }
-    
-    
+
+
     
     Ok(())
 }

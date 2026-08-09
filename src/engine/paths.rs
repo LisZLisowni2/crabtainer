@@ -5,7 +5,7 @@ pub struct RustockerPaths;
 
 impl RustockerPaths {
     pub fn base_dir() -> PathBuf {
-        PathBuf::from("/var/rocker")
+        PathBuf::from("/var/rustocker")
     }
 
     pub fn image_store_dir() -> PathBuf {

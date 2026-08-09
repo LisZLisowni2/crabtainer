@@ -13,11 +13,11 @@ pub enum Instruction {
 }
 
 #[derive(Debug, Default)]
-pub struct Rockerfile {
+pub struct Rustockerfile {
     pub instructions: Vec<Instruction>,
 }
 
-impl Rockerfile {
+impl Rustockerfile {
     pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Error reading file: {:?}", e))?;
@@ -91,6 +91,6 @@ impl Rockerfile {
             }
         }
 
-        Ok(Rockerfile { instructions })
+        Ok(Rustockerfile { instructions })
     }
 }
