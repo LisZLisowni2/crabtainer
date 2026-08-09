@@ -2,7 +2,7 @@ use crate::engine::rustockerfile::{Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
-use crate::engine::instructions::copy::copy;
+use crate::engine::instructions::copy::{copy_to_layout};
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
@@ -46,7 +46,7 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
             },
             Instruction::Copy {src, dst} => {
                 println!(" => [{}/{}] COPY {} to {}", count, steps, src, dst);
-                copy(src, dst, &output_layout_name).await?;
+                copy_to_layout(src.as_str(), dst.as_str(), &output_layout_name).await?;
             }
             Instruction::Run(command) => {
                 println!(" => [{}/{}] RUN {}", count, steps, command);

@@ -2,7 +2,7 @@ mod common;
 
 use Rustocker::engine::builder::build_layout;
 use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::instructions::copy::copy;
+use Rustocker::engine::instructions::copy::{copy_to_layout};
 use Rustocker::engine::instructions::from::from_image;
 
 #[tokio::test]
@@ -10,7 +10,7 @@ async fn copy_creates_nested_destination_directories() {
     let _env = common::isolated_home();
     let home = _env.home();
 
-    copy("whatever".to_string(), "/etc/app/config".to_string(), &"my-layout".to_string())
+    copy_to_layout("whatever", "/etc/app/config", &"my-layout".to_string())
         .await
         .unwrap();
 
@@ -23,7 +23,7 @@ async fn copy_handles_relative_destination() {
     let _env = common::isolated_home();
     let home = _env.home();
 
-    copy("whatever".to_string(), "opt/bin".to_string(), &"my-layout".to_string())
+    copy_to_layout("whatever", "opt/bin", &"my-layout")
         .await
         .unwrap();
 
