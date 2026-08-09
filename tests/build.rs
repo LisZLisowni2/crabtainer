@@ -2,33 +2,59 @@ mod common;
 
 use Rustocker::engine::builder::build_layout;
 use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::instructions::copy::{copy_to_layout};
+use Rustocker::engine::instructions::copy::copy_to_layout;
 use Rustocker::engine::instructions::from::from_image;
 
 #[tokio::test]
-async fn copy_creates_nested_destination_directories() {
+async fn copy_to_layout_copies_a_single_file() {
     let _env = common::isolated_home();
     let home = _env.home();
 
-    copy_to_layout("whatever", "/etc/app/config", &"my-layout".to_string())
-        .await
-        .unwrap();
+    copy_to_layout("Cargo.toml", "/app", "my-layout").await.unwrap();
 
-    let expected = home.join("layouts").join("my-layout").join("rootfs").join("etc").join("app").join("config");
-    assert!(expected.is_dir());
+    let copied = home.join("layouts").join("my-layout").join("rootfs").join("app").join("Cargo.toml");
+    assert!(copied.is_file(), "file should be copied to {:?}", copied);
+    assert_eq!(
+        std::fs::read_to_string(&copied).unwrap(),
+        std::fs::read_to_string("Cargo.toml").unwrap()
+    );
 }
 
 #[tokio::test]
-async fn copy_handles_relative_destination() {
+async fn copy_to_layout_copies_directory_recursively() {
     let _env = common::isolated_home();
     let home = _env.home();
 
-    copy_to_layout("whatever", "opt/bin", &"my-layout")
-        .await
-        .unwrap();
+    copy_to_layout("src", "/code", "my-layout").await.unwrap();
 
-    let expected = home.join("layouts").join("my-layout").join("rootfs").join("opt").join("bin");
-    assert!(expected.is_dir());
+    let copied = home.join("layouts").join("my-layout").join("rootfs").join("code").join("src").join("lib.rs");
+    assert!(copied.is_file(), "directory contents should be copied to {:?}", copied);
+}
+
+#[tokio::test]
+async fn copy_to_layout_expands_glob_patterns() {
+    let _env = common::isolated_home();
+    let home = _env.home();
+
+    copy_to_layout("Cargo.*", "/pkgs", "my-layout").await.unwrap();
+
+    let rootfs = home.join("layouts").join("my-layout").join("rootfs").join("pkgs");
+    assert!(rootfs.join("Cargo.toml").is_file());
+    assert!(rootfs.join("Cargo.lock").is_file());
+}
+
+#[tokio::test]
+async fn copy_to_layout_star_respects_rustockerignore() {
+    let _env = common::isolated_home();
+    let home = _env.home();
+
+    copy_to_layout("*", "/workspace", "my-layout").await.unwrap();
+
+    let rootfs = home.join("layouts").join("my-layout").join("rootfs").join("workspace");
+    assert!(rootfs.join("Cargo.toml").is_file());
+    assert!(rootfs.join("src").join("lib.rs").is_file());
+    assert!(!rootfs.join("target").exists(), "ignored directory should not be copied");
+    assert!(!rootfs.join(".rustockerignore").exists(), "ignore file itself is never copied");
 }
 
 #[tokio::test]

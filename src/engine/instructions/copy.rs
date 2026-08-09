@@ -30,19 +30,26 @@ impl RustockerIgnore {
                     (line, false)
                 };
 
-                let pattern_str = if !raw_pattern.contains('*') && !raw_pattern.contains('?') {
-                    format!("{0}{{{0},/**}}", raw_pattern.trim_start_matches('/'))
-                } else {
-                    raw_pattern.trim_start_matches('/').to_string()
-                };
+                let base = raw_pattern.trim_start_matches('/');
 
                 let mut builder = GlobSetBuilder::new();
 
-                if let Ok(glob) = Glob::new(&pattern_str) {
-                    builder.add(glob);
-                    if let Ok(globset) = builder.build() {
-                        rules.push((globset, is_negated));
+                if base.contains('*') || base.contains('?') {
+                    if let Ok(glob) = Glob::new(base) {
+                        builder.add(glob);
                     }
+                } else {
+                    let dir = base.trim_end_matches('/');
+                    if let Ok(glob) = Glob::new(dir) {
+                        builder.add(glob);
+                    }
+                    if let Ok(glob) = Glob::new(&format!("{}/**", dir)) {
+                        builder.add(glob);
+                    }
+                }
+
+                if let Ok(globset) = builder.build() {
+                    rules.push((globset, is_negated));
                 }
             }
         }
@@ -82,9 +89,8 @@ impl RustockerIgnore {
         }) {
             if let Ok(entry) = entry {
                 if entry.file_type().is_file() {
-                    if let Ok(rel) = entry.path().strip_prefix(&self.root) {
-                        files.push(entry.into_path());
-                    }
+                    let rel = entry.path().strip_prefix(&self.root).unwrap_or(entry.path());
+                    files.push(rel.to_path_buf());
                 }
             }
         }

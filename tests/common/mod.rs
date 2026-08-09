@@ -9,7 +9,7 @@ pub struct EnvScope {
 }
 
 pub fn isolated_home() -> EnvScope {
-    let guard = ENV_LOCK.lock().unwrap();
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = tempfile::tempdir().unwrap();
     // SAFETY: serialized behind ENV_LOCK so no other thread touches this env var.
     unsafe { std::env::set_var("RUSTOCKER_HOME", home.path()) };
