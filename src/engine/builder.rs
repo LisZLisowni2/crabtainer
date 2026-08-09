@@ -10,9 +10,8 @@ use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
 #[derive(Serialize, Deserialize)]
-struct LayoutOpts {
-    rootfs: PathBuf,
-    cmd: Vec<String>,
+pub struct LayoutOpts {
+    pub cmd: Vec<String>,
 }
 
 pub async fn build_layout(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
@@ -33,7 +32,6 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
     let mut count = 0;
     let steps = rustocker.instructions.len();
     let mut opts = LayoutOpts {
-        rootfs: output_path.join("rootfs"),
         cmd: vec![]
     };
     
@@ -64,7 +62,7 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
     }
 
     println!("[BUILDER] Instruction done. Injecting config.");
-    
+
     let json_string = serde_json::to_string_pretty(&opts).unwrap();
     std::fs::write(output_path.join("config.json"), json_string).unwrap();
 

@@ -5,9 +5,11 @@ use nix::unistd::{chroot, chdir, execvp, sethostname};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use nix::NixPath;
 use rand::{Rng, RngExt};
 use crate::engine::paths::RustockerPaths;
 
+#[derive(Debug)]
 pub struct ContainerOptions {
     pub layout_name: String,
     pub command: String,
@@ -33,6 +35,23 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
             opts.layout_name
         ));
     }
+
+    let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(fs::read_to_string(layout_dir.join("config.json")).unwrap().as_str()).unwrap();
+    let mut command = String::new();
+    println!("[DEBUG] {}", opts.command.is_empty());
+
+    if opts.command.is_empty() {
+        command = layout_opts.cmd.iter().map(|s| { 
+            let format = format!("{} ", s);
+
+            let x = format.trim();
+            return x.to_string();
+        }).collect();
+    } else {
+        command = opts.command;
+    }
+
+    println!("[DEBUG] {}", command);
 
     let container_id = generate_container_id();
 
@@ -75,9 +94,15 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         | CloneFlags::CLONE_NEWPID
         | CloneFlags::CLONE_NEWNS;
 
+    let final_opts = ContainerOptions {
+        layout_name: opts.layout_name,
+        args: opts.args,
+        command
+    };
+    println!("[DEBUG] {:?}", final_opts);
     let child_pid = unsafe {
         clone(
-            Box::new(|| child_process(&merged_rootfs, &opts)),
+            Box::new(|| child_process(&merged_rootfs, &final_opts)),
             &mut stack,
             flags,
             Some(Signal::SIGCHLD as i32)

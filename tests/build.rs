@@ -96,6 +96,36 @@ async fn build_layout_processes_instructions_end_to_end() {
     let rootfs = home.join("layouts").join("final").join("rootfs");
     assert!(rootfs.join("marker.txt").is_file(), "base image should be extracted");
     assert!(rootfs.join("opt").join("app").is_dir(), "COPY target should exist");
+
+    let config = home.join("layouts").join("final").join("config.json");
+    assert!(config.is_file(), "config.json should be written");
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(json["cmd"], serde_json::json!([]), "no CMD instruction -> empty cmd");
+    assert_eq!(
+        json["rootfs"],
+        serde_json::json!(rootfs.to_str().unwrap()),
+        "rootfs should point into the layout"
+    );
+}
+
+#[tokio::test]
+async fn build_layout_injects_cmd_into_config_json() {
+    let _env = common::isolated_home();
+    let home = _env.home();
+    common::create_tarball(home, "base", &[("marker.txt", "rootfs-marker")]);
+
+    let rustockerfile = home.join("Rustockerfile");
+    std::fs::write(&rustockerfile, "FROM base\nCMD /bin/sh -c\n").unwrap();
+
+    build_layout(rustockerfile.to_str().unwrap().to_string(), "final".to_string())
+        .await
+        .unwrap();
+
+    let config = home.join("layouts").join("final").join("config.json");
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(json["cmd"], serde_json::json!(["/bin/sh", "-c"]));
 }
 
 #[tokio::test]
@@ -124,11 +154,15 @@ async fn run_container_errors_when_layout_missing() {
 
     let result = std::thread::Builder::new()
         .stack_size(16 * 1024 * 1024)
-        .spawn(move || run_container(opts))
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(run_container(opts))
+        })
         .unwrap()
         .join()
         .unwrap();
 
-    let err = result.await.unwrap_err();
+    let err = result.unwrap_err();
     assert!(err.contains("doesn't exist"), "unexpected error: {}", err);
 }

@@ -8,3 +8,5 @@ COPY Rustockerfile /
 COPY Rustockerfile /test/
 COPY src/lib.rs /test/
 COPY * /test/entire_base/
+
+CMD /bin/sh

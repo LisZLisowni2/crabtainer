@@ -120,12 +120,16 @@ async fn run_container_requires_root_and_overlayfs() {
     };
     let result = std::thread::Builder::new()
         .stack_size(16 * 1024 * 1024)
-        .spawn(move || run_container(opts))
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(run_container(opts))
+        })
         .unwrap()
         .join()
         .unwrap();
 
-    if let Err(e) = result.await {
+    if let Err(e) = result {
         if e.contains("Error during mounting OverlayFS") || e.contains("Operation not permitted") {
             eprintln!("SKIP: OverlayFS mount not permitted in this environment: {}", e);
         } else {
