@@ -26,7 +26,6 @@ pub async fn run_in_container(output_layout_name: &String, command: String) -> R
         )
             .expect(" => [RUN] Failed to spawn a child process")
     };
-    eprintln!(" => [RUN] Cloned child process: {}", child_pid);
 
     nix::sys::wait::waitpid(child_pid, None).unwrap();
 
@@ -69,7 +68,13 @@ fn child_process(rootfs: &PathBuf, layout_name: &String, command: &String) -> is
         }
     };
 
-    let _ = umount2(&proc_target, MntFlags::MNT_DETACH);
+    match umount2("/proc", MntFlags::MNT_DETACH) {
+        Ok(_) => println!(" => [RUN] Successfully umounted proc directory"),
+        Err(nix::errno::Errno::ENOENT) | Err(nix::errno::Errno::EINVAL) => {
+            println!(" => [RUN] Proc actually umounted");
+        }
+        Err(e) => println!(" => [RUN] Failed to umount proc directory: {}", e),
+    }
 
     if status.success() { 0 } else { 1 }
 }

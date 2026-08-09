@@ -128,7 +128,7 @@ fn child_process(rootfs: &Path, options: &ContainerOptions) -> isize {
         .status()
         .unwrap_or_else(|_| ExitStatus::default());
 
-    let _ = umount2(&proc_target, MntFlags::MNT_DETACH);
+    let _ = umount2("/proc", MntFlags::MNT_DETACH);
 
     if status.success() { 0 } else { 1 }
 }

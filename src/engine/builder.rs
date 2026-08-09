@@ -49,8 +49,8 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
                 // TODO: Copy file from host to rootfs in /tmp
             }
             Instruction::Run(command) => {
-                // println!(" => [{}/{}] RUN {}", count, steps, command);
-                // run_in_container(&output_layout_name, command).await?;
+                println!(" => [{}/{}] RUN {}", count, steps, command);
+                run_in_container(&output_layout_name, command).await?;
             },
             Instruction::Cmd(cmd) => {
                 println!(" => [{}/{}] CMD {:?}", count, steps, cmd);
