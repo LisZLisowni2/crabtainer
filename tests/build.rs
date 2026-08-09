@@ -129,6 +129,6 @@ async fn run_container_errors_when_layout_missing() {
         .join()
         .unwrap();
 
-    let err = result.unwrap_err();
+    let err = result.await.unwrap_err();
     assert!(err.contains("doesn't exist"), "unexpected error: {}", err);
 }

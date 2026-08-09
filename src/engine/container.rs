@@ -22,7 +22,7 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
+pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     println!("[HOST] Running a container...");
 
@@ -54,20 +54,19 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
         work_dir.to_str().unwrap()
     );
 
-    let _ = mount(
+    mount(
         Some("overlay"),
-        &merged_rootfs,
+        &container_workdir,
         Some("overlay"),
         MsFlags::empty(),
         Some(overlay_opts.as_str()),
     )
         .map_err(|e| format!("Error during mounting OverlayFS: {}", e));
 
-    let container_rootfs = container_workdir.join("rootfs");
-
     println!("[HOST] Starting container {}", container_id);
 
-    let proc_dir = container_workdir.join("proc");
+    let proc_dir = merged_rootfs.join("proc");
+    println!("[DEBUG] {}", proc_dir.display());
     fs::create_dir_all(&proc_dir).ok();
 
     let mut stack: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
@@ -78,7 +77,7 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let child_pid = unsafe {
         clone(
-            Box::new(|| child_process(&container_rootfs, &opts)),
+            Box::new(|| child_process(&merged_rootfs, &opts)),
             &mut stack,
             flags,
             Some(Signal::SIGCHLD as i32)
@@ -88,10 +87,10 @@ pub fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     nix::sys::wait::waitpid(child_pid, None).unwrap();
 
-    println!("[HOST] Remove container's tmp directory {}", container_id);
+    println!("[HOST] Umount overlayfs {}", container_id);
 
-    if let Err(e) = umount2(&merged_rootfs, MntFlags::MNT_DETACH) {
-        eprintln!("[WARN] Failed to remove tmp directory: {}", e);
+    if let Err(e) = umount2(&container_workdir, MntFlags::MNT_DETACH) {
+        eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
     let _ = fs::remove_dir_all(&container_workdir);
@@ -105,6 +104,7 @@ fn child_process(rootfs: &Path, options: &ContainerOptions) -> isize {
     let _ = sethostname(&options.layout_name);
 
     let proc_target = rootfs.join("proc");
+
     let _ = mount(
         Some("proc"),
         &proc_target,

@@ -125,7 +125,7 @@ async fn run_container_requires_root_and_overlayfs() {
         .join()
         .unwrap();
 
-    if let Err(e) = result {
+    if let Err(e) = result.await {
         if e.contains("Error during mounting OverlayFS") || e.contains("Operation not permitted") {
             eprintln!("SKIP: OverlayFS mount not permitted in this environment: {}", e);
         } else {

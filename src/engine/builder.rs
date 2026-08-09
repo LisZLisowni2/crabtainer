@@ -2,10 +2,14 @@ use crate::engine::rustockerfile::{Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use tokio::fs::File;
+use tokio::io::BufWriter;
 use crate::engine::instructions::copy::{copy_to_layout};
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
+#[derive(Serialize, Deserialize)]
 struct LayoutOpts {
     rootfs: PathBuf,
     cmd: Vec<String>,
@@ -59,7 +63,10 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
         }
     }
 
-    println!("[BUILDER] Instruction done");
+    println!("[BUILDER] Instruction done. Injecting config.");
     
+    let json_string = serde_json::to_string_pretty(&opts).unwrap();
+    std::fs::write(output_path.join("config.json"), json_string).unwrap();
+
     Ok(())
 }

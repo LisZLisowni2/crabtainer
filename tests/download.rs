@@ -44,7 +44,7 @@ async fn skips_download_when_image_exists() {
 
     assert_eq!(path, img_dir.join("existing.tar.gz"));
     assert_eq!(std::fs::read(&path).unwrap(), b"existing");
-    mock.assert_hits(0);
+    mock.assert_calls(0);
 }
 
 #[tokio::test]
