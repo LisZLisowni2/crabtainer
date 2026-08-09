@@ -2,6 +2,7 @@ use crate::engine::rustockerfile::{Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
+use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
 struct LayoutOpts {
@@ -21,7 +22,7 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
     let output_path = RustockerPaths::layout_store_dir().join(&output_layout_name);
 
     if std::fs::metadata(&output_path).is_ok() {
-        println!("[WARN] Directory {} already exists!", output_layout_name);
+        println!("[WARN] Layout {} already exists!", output_layout_name);
     }
     let _ = std::fs::create_dir_all(&output_path);
 
@@ -48,8 +49,8 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
                 // TODO: Copy file from host to rootfs in /tmp
             }
             Instruction::Run(command) => {
-                println!(" => [{}/{}] RUN {}", count, steps, command);
-                // TODO: Run temporary container chroot, execute command and save to layer
+                // println!(" => [{}/{}] RUN {}", count, steps, command);
+                // run_in_container(&output_layout_name, command).await?;
             },
             Instruction::Cmd(cmd) => {
                 println!(" => [{}/{}] CMD {:?}", count, steps, cmd);
@@ -58,7 +59,7 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
         }
     }
 
-
+    println!("[BUILDER] Instruction done");
     
     Ok(())
 }
