@@ -21,10 +21,14 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
         return Err(format!(" => [FROM] Image {} can not be found", base_image));
     }
 
-    println!(" => [FROM] Extract rootfs from {} to {} rootfs", base_image, output_layout_name);
+    println!(" => [FROM] Extract rootfs from {} to {}'s rootfs", base_image, output_layout_name);
+    let path = RustockerPaths::layout_store_dir().join(output_layout_name).join("rootfs");
 
+    std::fs::create_dir_all(&path).map_err(|e| format!("Error creating output directory: {}", e))?;
+
+    // TODO: Handle other types of zip (like .zip)
     let status = Command::new("tar")
-        .args(["-xzf", &found_file.to_string_lossy(), "-C", RustockerPaths::layout_store_dir().join(output_layout_name).join("rootfs").to_str().unwrap()])
+        .args(["-xzf", &found_file.to_string_lossy(), "-C", &path.to_str().unwrap()])
         .status()
         .await
         .map_err(|e| format!(" => [FROM] Error spwaning tar: {}", e))?;
