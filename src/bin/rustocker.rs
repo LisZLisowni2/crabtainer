@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use nix::libc::exit;
 use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::builder::build_image;
+use Rustocker::engine::builder::{build_layout};
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -44,10 +44,10 @@ async fn main() {
     match cli.command {
         Commands::Run { layout, command, args } => {
             let options = ContainerOptions { layout_name: layout, command, args };
-            let _ = run_container(options);
+            let _ = run_container(options).await.unwrap();
         },
         Commands::Build { file, tag } => {
-            build_image(file, tag).await.unwrap();
+            build_layout(file, tag).await.unwrap();
         },
         Commands::Images => {
             let store = Rustocker::engine::paths::RustockerPaths::image_store_dir();

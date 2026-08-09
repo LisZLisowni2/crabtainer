@@ -2,19 +2,22 @@ use crate::engine::rustockerfile::{Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use tokio::fs::File;
+use tokio::io::BufWriter;
+use crate::engine::instructions::copy::{copy_to_layout};
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
-struct LayoutOpts {
-    rootfs: PathBuf,
-    cmd: Vec<String>,
+#[derive(Serialize, Deserialize)]
+pub struct LayoutOpts {
+    pub cmd: Vec<String>,
 }
 
-pub async fn build_image(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
+pub async fn build_layout(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
     let rustocker_path = Path::new(rustocker_file.as_str());
 
-    let rustocker = Rustockerfile::parse_from_file(rustocker_path)
-        .expect("Error parsing rustocker");
+    let rustocker = Rustockerfile::parse_from_file(rustocker_path)?;
 
     println!("[BUILDER] Building an layout: {}", output_layout_name);
     println!("[BUILDER] Create a dir for layout: {}", output_layout_name);
@@ -29,7 +32,6 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
     let mut count = 0;
     let steps = rustocker.instructions.len();
     let mut opts = LayoutOpts {
-        rootfs: output_path.join("rootfs"),
         cmd: vec![]
     };
     
@@ -46,7 +48,7 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
             },
             Instruction::Copy {src, dst} => {
                 println!(" => [{}/{}] COPY {} to {}", count, steps, src, dst);
-                // TODO: Copy file from host to rootfs in /tmp
+                copy_to_layout(src.as_str(), dst.as_str(), &output_layout_name).await?;
             }
             Instruction::Run(command) => {
                 println!(" => [{}/{}] RUN {}", count, steps, command);
@@ -59,7 +61,10 @@ pub async fn build_image(rustocker_file: String, output_layout_name: String) -> 
         }
     }
 
-    println!("[BUILDER] Instruction done");
-    
+    println!("[BUILDER] Instruction done. Injecting config.");
+
+    let json_string = serde_json::to_string_pretty(&opts).unwrap();
+    std::fs::write(output_path.join("config.json"), json_string).unwrap();
+
     Ok(())
 }

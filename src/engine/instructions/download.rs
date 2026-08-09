@@ -34,7 +34,7 @@ pub async fn download_image_if_missing(url: &str, alias: &str) -> Result<std::pa
     let pb = indicatif::ProgressBar::new(total_size);
     pb.set_style(
         indicatif::ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precies}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
             .unwrap()
             .progress_chars("#>-")
     );
