@@ -2,4 +2,4 @@ DOWNLOAD https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-mini
 
 FROM alpine-base
 
-RUN apk add vim
+RUN mkdir test
