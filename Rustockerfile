@@ -3,3 +3,8 @@ DOWNLOAD https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-mini
 FROM alpine-base
 
 RUN mkdir test
+
+COPY Rustockerfile /
+COPY Rustockerfile /test/
+COPY src/lib.rs /test/
+COPY * /test/entire_base/
