@@ -44,7 +44,7 @@ async fn main() {
     match cli.command {
         Commands::Run { layout, command, args } => {
             let options = ContainerOptions { layout_name: layout, command, args };
-            run_container(options);
+            let _ = run_container(options);
         },
         Commands::Build { file, tag } => {
             build_image(file, tag).await.unwrap();
