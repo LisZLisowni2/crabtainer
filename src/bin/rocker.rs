@@ -23,7 +23,7 @@ enum Commands {
         args: Vec<String>,
     },
     Build {
-        #[arg(short, long, default_value = "Rockerfile")]
+        #[arg(short, long, default_value = "Rustockerfile")]
         file: String,
 
         #[arg(short, long)]
