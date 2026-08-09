@@ -24,6 +24,14 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+pub(crate) fn resolve_command(command: &str, layout_cmd: &[String]) -> String {
+    if command.is_empty() {
+        layout_cmd.join(" ")
+    } else {
+        command.to_string()
+    }
+}
+
 pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     println!("[HOST] Running a container...");
@@ -37,21 +45,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     }
 
     let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(fs::read_to_string(layout_dir.join("config.json")).unwrap().as_str()).unwrap();
-    let mut command = String::new();
-    println!("[DEBUG] {}", opts.command.is_empty());
-
-    if opts.command.is_empty() {
-        command = layout_opts.cmd.iter().map(|s| { 
-            let format = format!("{} ", s);
-
-            let x = format.trim();
-            return x.to_string();
-        }).collect();
-    } else {
-        command = opts.command;
-    }
-
-    println!("[DEBUG] {}", command);
+    let command = resolve_command(&opts.command, &layout_opts.cmd);
 
     let container_id = generate_container_id();
 
@@ -99,7 +93,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         args: opts.args,
         command
     };
-    println!("[DEBUG] {:?}", final_opts);
+
     let child_pid = unsafe {
         clone(
             Box::new(|| child_process(&merged_rootfs, &final_opts)),
@@ -169,5 +163,22 @@ mod tests {
             assert_eq!(id.len(), 12);
             assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
         }
+    }
+
+    #[test]
+    fn resolve_command_uses_layout_cmd_when_command_empty() {
+        let cmd = vec!["/bin/sh".to_string(), "-c".to_string(), "echo hi".to_string()];
+        assert_eq!(resolve_command("", &cmd), "/bin/sh -c echo hi");
+    }
+
+    #[test]
+    fn resolve_command_prefers_provided_command() {
+        let cmd = vec!["/bin/sh".to_string(), "-c".to_string()];
+        assert_eq!(resolve_command("ls", &cmd), "ls");
+    }
+
+    #[test]
+    fn resolve_command_empty_cmd_yields_empty_string() {
+        assert_eq!(resolve_command("", &[]), "");
     }
 }

@@ -102,11 +102,7 @@ async fn build_layout_processes_instructions_end_to_end() {
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(json["cmd"], serde_json::json!([]), "no CMD instruction -> empty cmd");
-    assert_eq!(
-        json["rootfs"],
-        serde_json::json!(rootfs.to_str().unwrap()),
-        "rootfs should point into the layout"
-    );
+    assert!(json.get("rootfs").is_none(), "rootfs field was removed from config");
 }
 
 #[tokio::test]

@@ -113,6 +113,12 @@ async fn run_container_requires_root_and_overlayfs() {
     common::create_tarball(home, "base", &[("marker", "1")]);
     from_image(&"base".to_string(), &"layout-a".to_string()).await.unwrap();
 
+    let layout_config = home.join("layouts").join("layout-a").join("config.json");
+    let config = Rustocker::engine::builder::LayoutOpts {
+        cmd: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+    };
+    std::fs::write(&layout_config, serde_json::to_string(&config).unwrap()).unwrap();
+
     let opts = ContainerOptions {
         layout_name: "layout-a".to_string(),
         command: "/bin/sh".to_string(),
