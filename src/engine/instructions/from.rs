@@ -22,7 +22,8 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     }
 
     println!(" => [FROM] Extract rootfs from {} to {} rootfs", base_image, output_layout_name);
-
+    
+    // TODO: Handle other types of zip (like .zip)
     let status = Command::new("tar")
         .args(["-xzf", &found_file.to_string_lossy(), "-C", RustockerPaths::layout_store_dir().join(output_layout_name).join("rootfs").to_str().unwrap()])
         .status()
