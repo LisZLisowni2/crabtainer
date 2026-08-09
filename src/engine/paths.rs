@@ -5,7 +5,9 @@ pub struct RustockerPaths;
 
 impl RustockerPaths {
     pub fn base_dir() -> PathBuf {
-        PathBuf::from("/var/rustocker")
+        std::env::var("RUSTOCKER_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/var/rustocker"))
     }
 
     pub fn image_store_dir() -> PathBuf {
@@ -28,5 +30,66 @@ impl RustockerPaths {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_home<T>(home: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized behind ENV_LOCK so no other thread touches this env var.
+        unsafe { std::env::set_var("RUSTOCKER_HOME", home) };
+        let result = f();
+        unsafe { std::env::remove_var("RUSTOCKER_HOME") };
+        result
+    }
+
+    fn without_home<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: serialized behind ENV_LOCK.
+        unsafe { std::env::remove_var("RUSTOCKER_HOME") };
+        f()
+    }
+
+    #[test]
+    fn base_dir_defaults_to_var_rustocker() {
+        without_home(|| {
+            assert_eq!(RustockerPaths::base_dir(), PathBuf::from("/var/rustocker"));
+        });
+    }
+
+    #[test]
+    fn base_dir_honors_rustocker_home() {
+        let home = std::env::temp_dir().join("rustocker-test-home");
+        with_home(home.to_str().unwrap(), || {
+            assert_eq!(RustockerPaths::base_dir(), home);
+        });
+    }
+
+    #[test]
+    fn subdirs_are_relative_to_base() {
+        let home = std::env::temp_dir().join("rustocker-test-layout");
+        with_home(home.to_str().unwrap(), || {
+            assert_eq!(RustockerPaths::image_store_dir(), home.join("images"));
+            assert_eq!(RustockerPaths::layout_store_dir(), home.join("layouts"));
+            assert_eq!(RustockerPaths::runtime_dir(), home.join("containers"));
+        });
+    }
+
+    #[test]
+    fn init_system_dirs_creates_all_dirs() {
+        let home = std::env::temp_dir().join("rustocker-test-init");
+        with_home(home.to_str().unwrap(), || {
+            RustockerPaths::init_system_dirs().unwrap();
+            assert!(RustockerPaths::image_store_dir().is_dir());
+            assert!(RustockerPaths::layout_store_dir().is_dir());
+            assert!(RustockerPaths::runtime_dir().is_dir());
+        });
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

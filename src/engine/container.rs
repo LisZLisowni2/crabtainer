@@ -14,7 +14,7 @@ pub struct ContainerOptions {
     pub args: Vec<String>,
 }
 
-fn generate_container_id() -> String {
+pub(crate) fn generate_container_id() -> String {
     let mut rng = rand::rng();
 
     let bytes: [u8; 6] = rng.random();
@@ -131,4 +131,18 @@ fn child_process(rootfs: &Path, options: &ContainerOptions) -> isize {
     let _ = umount2("/proc", MntFlags::MNT_DETACH);
 
     if status.success() { 0 } else { 1 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_container_id_is_12_lowercase_hex_chars() {
+        for _ in 0..100 {
+            let id = generate_container_id();
+            assert_eq!(id.len(), 12);
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
 }

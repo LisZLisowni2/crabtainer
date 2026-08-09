@@ -14,8 +14,7 @@ struct LayoutOpts {
 pub async fn build_layout(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
     let rustocker_path = Path::new(rustocker_file.as_str());
 
-    let rustocker = Rustockerfile::parse_from_file(rustocker_path)
-        .expect("Error parsing rustocker");
+    let rustocker = Rustockerfile::parse_from_file(rustocker_path)?;
 
     println!("[BUILDER] Building an layout: {}", output_layout_name);
     println!("[BUILDER] Create a dir for layout: {}", output_layout_name);
