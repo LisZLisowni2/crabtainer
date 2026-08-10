@@ -1,4 +1,4 @@
-use crate::engine::rustockerfile::{Instruction, Rustockerfile};
+use crate::engine::rustockerfile::{parse_memory_limit, Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
@@ -9,9 +9,12 @@ use crate::engine::instructions::copy::{copy_to_layout};
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct LayoutOpts {
-    pub cmd: Vec<String>,
+    pub memory_limit: Option<f64>,
+    pub cpu_limit: Option<f64>,
+    pub cmd: Option<String>,
+    pub args: Vec<String>,
 }
 
 pub async fn build_layout(rustocker_file: String, output_layout_name: String) -> Result<(), String> {
@@ -32,7 +35,10 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
     let mut count = 0;
     let steps = rustocker.instructions.len();
     let mut opts = LayoutOpts {
-        cmd: vec![]
+        memory_limit: None,
+        cpu_limit: None,
+        cmd: None,
+        args: vec![],
     };
     
     for instruction in rustocker.instructions {
@@ -54,9 +60,19 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
                 println!(" => [{}/{}] RUN {}", count, steps, command);
                 run_in_container(&output_layout_name, command).await?;
             },
-            Instruction::Cmd(cmd) => {
-                println!(" => [{}/{}] CMD {:?}", count, steps, cmd);
-                opts.cmd = cmd;
+            Instruction::Cmd  { cmd, args } => {
+                println!(" => [{}/{}] CMD {:?} {:?}", count, steps, cmd, args);
+                opts.cmd = Some(cmd);
+                opts.args = args.clone();
+            },
+            Instruction::CpuLimit(cores) => {
+                println!(" => [{}/{}] CPU LIMIT {}", count, steps, cores);
+                opts.cpu_limit = Some(cores);
+            },
+            Instruction::MemoryLimit(limit) => {
+                println!(" => [{}/{}] MEMORY LIMIT {}", count, steps, limit);
+                let bytes = parse_memory_limit(limit.as_str())?;
+                opts.memory_limit = Some(bytes);
             }
         }
     }
@@ -67,4 +83,30 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
     std::fs::write(output_path.join("config.json"), json_string).unwrap();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_opts() -> LayoutOpts {
+        LayoutOpts {
+            memory_limit: Some(2048.0),
+            cpu_limit: Some(1.5),
+            cmd: Some("/bin/sh".to_string()),
+            args: vec!["-c".to_string(), "echo hi".to_string()],
+        }
+    }
+
+    #[test]
+    fn layout_opts_serializes_round_trip() {
+        let opts = sample_opts();
+        let json = serde_json::to_string(&opts).unwrap();
+        let decoded: LayoutOpts = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.memory_limit, Some(2048.0));
+        assert_eq!(decoded.cpu_limit, Some(1.5));
+        assert_eq!(decoded.cmd, Some("/bin/sh".to_string()));
+        assert_eq!(decoded.args, vec!["-c".to_string(), "echo hi".to_string()]);
+    }
 }

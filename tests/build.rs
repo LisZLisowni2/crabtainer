@@ -1,9 +1,9 @@
 mod common;
 
-use Rustocker::engine::builder::build_layout;
-use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::instructions::copy::copy_to_layout;
-use Rustocker::engine::instructions::from::from_image;
+use rustocker::engine::builder::build_layout;
+use rustocker::engine::container::{run_container, ContainerOptions};
+use rustocker::engine::instructions::copy::copy_to_layout;
+use rustocker::engine::instructions::from::from_image;
 
 #[tokio::test]
 async fn copy_to_layout_copies_a_single_file() {
@@ -101,7 +101,8 @@ async fn build_layout_processes_instructions_end_to_end() {
     assert!(config.is_file(), "config.json should be written");
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(json["cmd"], serde_json::json!([]), "no CMD instruction -> empty cmd");
+    assert_eq!(json["cmd"], serde_json::Value::Null, "no CMD instruction -> cmd is null");
+    assert_eq!(json["args"], serde_json::json!([]), "no CMD instruction -> empty args");
     assert!(json.get("rootfs").is_none(), "rootfs field was removed from config");
 }
 
@@ -121,7 +122,8 @@ async fn build_layout_injects_cmd_into_config_json() {
     let config = home.join("layouts").join("final").join("config.json");
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(json["cmd"], serde_json::json!(["/bin/sh", "-c"]));
+    assert_eq!(json["cmd"], serde_json::json!("/bin/sh"));
+    assert_eq!(json["args"], serde_json::json!(["-c"]));
 }
 
 #[tokio::test]
@@ -146,6 +148,8 @@ async fn run_container_errors_when_layout_missing() {
         layout_name: "does-not-exist".to_string(),
         command: "/bin/true".to_string(),
         args: vec![],
+        cpu_limit: None,
+        memory_limit: None,
     };
 
     let result = std::thread::Builder::new()
