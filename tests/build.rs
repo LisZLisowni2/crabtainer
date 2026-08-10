@@ -1,9 +1,9 @@
 mod common;
 
-use Rustocker::engine::builder::build_layout;
-use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::instructions::copy::copy_to_layout;
-use Rustocker::engine::instructions::from::from_image;
+use rustocker::engine::builder::build_layout;
+use rustocker::engine::container::{run_container, ContainerOptions};
+use rustocker::engine::instructions::copy::copy_to_layout;
+use rustocker::engine::instructions::from::from_image;
 
 #[tokio::test]
 async fn copy_to_layout_copies_a_single_file() {
@@ -146,6 +146,8 @@ async fn run_container_errors_when_layout_missing() {
         layout_name: "does-not-exist".to_string(),
         command: "/bin/true".to_string(),
         args: vec![],
+        cpu_limit: None,
+        memory_limit: None,
     };
 
     let result = std::thread::Builder::new()

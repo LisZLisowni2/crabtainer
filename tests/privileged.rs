@@ -16,10 +16,10 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::instructions::from::from_image;
-use Rustocker::engine::instructions::run::run_in_container;
-use Rustocker::engine::paths::RustockerPaths;
+use rustocker::engine::container::{run_container, ContainerOptions};
+use rustocker::engine::instructions::from::from_image;
+use rustocker::engine::instructions::run::run_in_container;
+use rustocker::engine::paths::RustockerPaths;
 
 fn find_static_shell() -> Option<PathBuf> {
     let candidates = [
@@ -114,10 +114,11 @@ async fn run_container_requires_root_and_overlayfs() {
     from_image(&"base".to_string(), &"layout-a".to_string()).await.unwrap();
 
     let layout_config = home.join("layouts").join("layout-a").join("config.json");
-    let config = Rustocker::engine::builder::LayoutOpts {
+    let config = rustocker::engine::builder::LayoutOpts {
         cpu_limit: None,
         memory_limit: None,
-        cmd: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+        cmd: Some("/bin/sh".to_string()),
+        args: vec!["-c".to_string(), "true".to_string()],
     };
     std::fs::write(&layout_config, serde_json::to_string(&config).unwrap()).unwrap();
 
@@ -125,6 +126,8 @@ async fn run_container_requires_root_and_overlayfs() {
         layout_name: "layout-a".to_string(),
         command: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), "true".to_string()],
+        cpu_limit: None,
+        memory_limit: None
     };
     let result = std::thread::Builder::new()
         .stack_size(16 * 1024 * 1024)

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use nix::libc::exit;
-use Rustocker::engine::container::{run_container, ContainerOptions};
-use Rustocker::engine::builder::{build_layout};
+use rustocker::engine::container::{run_container, ContainerOptions};
+use rustocker::engine::builder::{build_layout};
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -16,10 +16,16 @@ enum Commands {
     Run {
         layout: String,
 
-        #[arg(default_value = "")]
+        #[arg(short = 'C', long)]
+        cpu_limit: Option<f64>,
+
+        #[arg(short = 'M', long)]
+        memory_limit: Option<f64>,
+
+        #[arg(short, long, default_value = "")]
         command: String,
 
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, requires = "command")]
         args: Vec<String>,
     },
     Build {
@@ -42,15 +48,15 @@ async fn main() {
     }
 
     match cli.command {
-        Commands::Run { layout, command, args } => {
-            let options = ContainerOptions { layout_name: layout, command, args };
+        Commands::Run { layout, command, args, cpu_limit, memory_limit } => {
+            let options = ContainerOptions { layout_name: layout, command, args, cpu_limit, memory_limit };
             let _ = run_container(options).await.unwrap();
         },
         Commands::Build { file, tag } => {
             build_layout(file, tag).await.unwrap();
         },
         Commands::Images => {
-            let store = Rustocker::engine::paths::RustockerPaths::image_store_dir();
+            let store = rustocker::engine::paths::RustockerPaths::image_store_dir();
             println!("{:<20} {:<15}", "ALIAS", "SIZE");
             println!("{}", "-".repeat(38));
             let status = std::fs::read_dir(&store);
@@ -65,7 +71,7 @@ async fn main() {
             }
         },
         Commands::Layouts => {
-            let store = Rustocker::engine::paths::RustockerPaths::layout_store_dir();
+            let store = rustocker::engine::paths::RustockerPaths::layout_store_dir();
             println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
             println!("{}", "-".repeat(38));
 

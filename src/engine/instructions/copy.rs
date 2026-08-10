@@ -124,8 +124,6 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
         ignore.extend(splited);
     }
 
-    println!("[COPY] {} -> {}", &src, &destination.display());
-
     let ignore_engine = RustockerIgnore::new(".");
 
     // Case 1: Universal wildcard (Copy entire workspace respecting ignores)

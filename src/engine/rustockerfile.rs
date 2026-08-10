@@ -9,7 +9,7 @@ pub enum Instruction {
     From(String),
     Copy { src: String, dst: String },
     Run(String),
-    Cmd(Vec<String>),
+    Cmd{ cmd: String, args: Vec<String> },
     CpuLimit(f64),
     MemoryLimit(String),
 }
@@ -107,8 +107,11 @@ impl Rustockerfile {
                     if args.is_empty() {
                         return Err(format!("Line {}: Required argument (CMD)", line_num + 1));
                     }
-                    let cmd_args = args.split_whitespace().map(|s| s.to_string()).collect();
-                    instructions.push(Instruction::Cmd(cmd_args));
+                    let cmd_args: Vec<String> = args.split_whitespace().map(|s| s.to_string()).collect();
+                    instructions.push(Instruction::Cmd {
+                        cmd: cmd_args[0].clone(),
+                        args: cmd_args[1..].to_vec(),
+                    });
                 },
                 "CPU_LIMIT" => {
                     if args.is_empty() {
@@ -130,7 +133,7 @@ impl Rustockerfile {
                     }
 
                     parse_memory_limit(args)
-                        .map_err(|e| format!("Line {}: {}", line_num + 1, e));
+                        .map_err(|e| format!("Line {}: {}", line_num + 1, e)).ok();
                     Instruction::MemoryLimit(args.to_string());
                 }
                 _ => {
@@ -150,8 +153,8 @@ mod tests {
     #[test]
     fn parses_all_instruction_types() {
         let content = "\
-FROM alpine-base
 DOWNLOAD https://example.com/alpine.tar.gz AS alpine-base
+FROM alpine-base
 COPY src /app
 RUN echo hello
 CMD /bin/sh -c
@@ -165,7 +168,7 @@ CMD /bin/sh -c
             },
             Instruction::Copy { src: "src".to_string(), dst: "/app".to_string() },
             Instruction::Run("echo hello".to_string()),
-            Instruction::Cmd(vec!["/bin/sh".to_string(), "-c".to_string()]),
+            Instruction::Cmd { cmd: "/bin/sh".to_string(), args: vec!["-c".to_string()] },
         ]);
     }
 

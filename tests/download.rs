@@ -1,7 +1,7 @@
 mod common;
 
 use httpmock::prelude::*;
-use Rustocker::engine::instructions::download::download_image_if_missing;
+use rustocker::engine::instructions::download::download_image_if_missing;
 
 #[tokio::test]
 async fn downloads_image_when_missing() {

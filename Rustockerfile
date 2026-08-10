@@ -7,6 +7,10 @@ RUN mkdir test
 COPY Rustockerfile /
 COPY Rustockerfile /test/
 COPY src/lib.rs /test/
+COPY src /test/src/
 COPY * /test/entire_base/
 
-CMD /bin/sh
+CPU_LIMIT 1.5
+MEMORY_LIMIT 2g
+
+CMD /bin/sh -c echo hello

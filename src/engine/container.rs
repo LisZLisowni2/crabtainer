@@ -2,11 +2,14 @@ use nix::mount::{mount, umount2, MsFlags, MntFlags};
 use nix::sched::{clone, CloneFlags};
 use nix::sys::signal::Signal;
 use nix::unistd::{chroot, chdir, execvp, sethostname};
-use std::fs;
+use std::{fs, io};
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use nix::libc::getchar;
 use nix::NixPath;
 use rand::{Rng, RngExt};
+use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::paths::RustockerPaths;
 
 #[derive(Debug)]
@@ -14,6 +17,8 @@ pub struct ContainerOptions {
     pub layout_name: String,
     pub command: String,
     pub args: Vec<String>,
+    pub cpu_limit: Option<f64>,
+    pub memory_limit: Option<f64>,
 }
 
 pub(crate) fn generate_container_id() -> String {
@@ -24,11 +29,19 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub(crate) fn resolve_command(command: &str, layout_cmd: &[String]) -> String {
+pub(crate) fn resolve_command(command: &str, layout_cmd: &String) -> String {
     if command.is_empty() {
-        layout_cmd.join(" ")
+        layout_cmd.to_string()
     } else {
         command.to_string()
+    }
+}
+
+pub(crate) fn resolve_args(args: &Vec<String>, layout_args: &Vec<String>) -> Vec<String> {
+    if args.is_empty() {
+        layout_args.to_vec()
+    } else {
+        args.to_vec()
     }
 }
 
@@ -39,13 +52,17 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
     if !layout_dir.exists() {
         return Err(format!(
-            "Layout '{}' doesn't exist! Build it first using 'rocker build'.",
+            "Layout '{}' doesn't exist! Build it first using 'rustocker build'.",
             opts.layout_name
         ));
     }
+    let layout_rootfs = layout_dir.join("rootfs");
 
     let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(fs::read_to_string(layout_dir.join("config.json")).unwrap().as_str()).unwrap();
-    let command = resolve_command(&opts.command, &layout_opts.cmd);
+    let command = resolve_command(&opts.command, &layout_opts.cmd.unwrap());
+    let args = resolve_args(&opts.args, &layout_opts.args);
+    let cpu_limit = opts.cpu_limit.or(layout_opts.cpu_limit);
+    let memory_limit = opts.memory_limit.or(layout_opts.memory_limit);
 
     let container_id = generate_container_id();
 
@@ -62,94 +79,161 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let overlay_opts = format!(
         "lowerdir={},upperdir={},workdir={}",
-        layout_dir.to_str().unwrap(),
+        layout_rootfs.to_str().unwrap(),
         upper_dir.to_str().unwrap(),
         work_dir.to_str().unwrap()
     );
 
+    println!("[HOST] Mount overlayfs");
+
     mount(
         Some("overlay"),
-        &container_workdir,
+        &merged_rootfs,
         Some("overlay"),
         MsFlags::empty(),
         Some(overlay_opts.as_str()),
     )
-        .map_err(|e| format!("Error during mounting OverlayFS: {}", e));
+        .expect("[ERROR] Failed to mount overlayfs");
 
     println!("[HOST] Starting container {}", container_id);
 
+    let final_opts = ContainerOptions {
+        layout_name: opts.layout_name,
+        args,
+        command,
+        cpu_limit,
+        memory_limit
+    };
+
+    let cgroup_dir = setup_cgroups(&container_id, &final_opts).await?;
+
     let proc_dir = merged_rootfs.join("proc");
-    println!("[DEBUG] {}", proc_dir.display());
     fs::create_dir_all(&proc_dir).ok();
 
-    let mut stack: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
+    let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
 
     let flags = CloneFlags::CLONE_NEWUTS
         | CloneFlags::CLONE_NEWPID
         | CloneFlags::CLONE_NEWNS;
 
-    let final_opts = ContainerOptions {
-        layout_name: opts.layout_name,
-        args: opts.args,
-        command
-    };
-
     let child_pid = unsafe {
         clone(
-            Box::new(|| child_process(&merged_rootfs, &final_opts)),
-            &mut stack,
+            Box::new(|| child_process(&merged_rootfs, &container_id, &final_opts)),
+            &mut stack[..],
             flags,
             Some(Signal::SIGCHLD as i32)
         )
-            .expect("Failed to spawn child.")
+            .expect("[ERROR] Failed to spawn child.")
     };
 
-    nix::sys::wait::waitpid(child_pid, None).unwrap();
+    if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid).await {
+        eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
+    };
 
-    println!("[HOST] Umount overlayfs {}", container_id);
+    tokio::task::spawn_blocking(move || {
+        nix::sys::wait::waitpid(child_pid, None).unwrap();
+    })
+        .await
+        .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
 
-    if let Err(e) = umount2(&container_workdir, MntFlags::MNT_DETACH) {
+    if let Err(e) = fs::remove_dir(&cgroup_dir) {
+        eprintln!("[WARN] Error during cgroup deletion: {}", e);
+    }
+
+    println!("[HOST] Umount overlayfs");
+
+    if let Err(e) = umount2(&merged_rootfs, MntFlags::MNT_DETACH) {
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    let _ = fs::remove_dir_all(&container_workdir);
+    fs::remove_dir_all(&container_workdir)
+        .map_err(|e| format!("[WARN] Failed to delete container workdir: {}", e))?;
 
     println!("[HOST] Container stopped");
 
     Ok(())
 }
 
-fn child_process(rootfs: &Path, options: &ContainerOptions) -> isize {
-    let _ = sethostname(&options.layout_name);
+fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOptions) -> isize {
+    sethostname(&container_id).ok();
 
-    let proc_target = rootfs.join("proc");
-
-    let _ = mount(
-        Some("proc"),
-        &proc_target,
-        Some("proc"),
-        MsFlags::empty(),
+    if let Err(e) = mount(
         None::<&str>,
-    );
+        "/",
+        None::<&str>,
+        MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+        None::<&str>,
+    ) {
+        eprintln!("[CHILD ERROR] Failed to mount / on MS_PRIVATE: {}", e);
+        return 1;
+    }
 
-    if let Err(e) = chroot(rootfs) {
-        eprintln!("Chroot error: {}", e);
+    if let Err(e) = mount(
+        Some(rootfs),
+        rootfs,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
+    ) {
+        eprintln!("[CHILD ERROR] Failed to mount old_root: {}", e);
+        return 1;
+    }
+
+    let old_root_dir = rootfs.join(".oldroot");
+    if let Err(e) = fs::create_dir_all(&old_root_dir) {
+        eprintln!("[CHILD ERROR] Failed to create old root: {}", e);
+        return 1;
+    }
+
+    if let Err(e) = chdir(rootfs) {
+        eprintln!("[CHILD ERROR] Failed to chdir root: {}", e);
+        return 1;
+    }
+
+    if let Err(e) = nix::unistd::pivot_root(".", ".oldroot") {
+        eprintln!("[CHILD ERROR] Failed to pivot root: {}", e);
         return 1;
     }
 
     if let Err(e) = chdir("/") {
-        eprintln!("chdir error: {}", e);
+        eprintln!("[CHILD ERROR] Failed to chdir root: {}", e);
         return 1;
     }
 
-    let status: ExitStatus = Command::new(&options.command)
-        .args(&options.args)
-        .status()
-        .unwrap_or_else(|_| ExitStatus::default());
+    let proc_target = Path::new("/proc");
 
-    let _ = umount2("/proc", MntFlags::MNT_DETACH);
+    if let Err(e) = mount(
+        Some("proc"),
+        proc_target,
+        Some("proc"),
+        MsFlags::empty(),
+        None::<&str>,
+    ) {
+        eprintln!("[CHILD ERROR] Failed to mount proc: {}", e);
+        return 1;
+    };
 
-    if status.success() { 0 } else { 1 }
+    umount2("/.oldroot", MntFlags::MNT_DETACH)
+        .map_err(|e| eprintln!("[CHILD WARN] Failed to umount .oldroot: {}", e))
+        .ok();
+
+    let old_root_path= Path::new("/.oldroot");
+    if let Err(e) = fs::remove_dir_all(&old_root_path) {
+        eprintln!("[WARN] Failed to remove old root: {}", e);
+    }
+
+    let cmd_cstring = CString::new(options.command.clone()).unwrap();
+    let mut args_cstring = vec![cmd_cstring.clone()];
+    for arg in &options.args {
+        args_cstring.push(CString::new(arg.clone()).unwrap());
+    }
+
+    if let Err(e) = execvp(&cmd_cstring, &args_cstring) {
+        eprintln!("[CHILD ERROR] Failed to exec {:?}: {}", options.command, e);
+        return 1;
+    }
+
+    0
 }
 
 #[cfg(test)]
@@ -167,18 +251,30 @@ mod tests {
 
     #[test]
     fn resolve_command_uses_layout_cmd_when_command_empty() {
-        let cmd = vec!["/bin/sh".to_string(), "-c".to_string(), "echo hi".to_string()];
-        assert_eq!(resolve_command("", &cmd), "/bin/sh -c echo hi");
+        let cmd = "ls".to_string();
+        assert_eq!(resolve_command("", &cmd), "ls");
     }
 
     #[test]
     fn resolve_command_prefers_provided_command() {
-        let cmd = vec!["/bin/sh".to_string(), "-c".to_string()];
+        let cmd = "find".to_string();
         assert_eq!(resolve_command("ls", &cmd), "ls");
     }
 
     #[test]
     fn resolve_command_empty_cmd_yields_empty_string() {
-        assert_eq!(resolve_command("", &[]), "");
+        assert_eq!(resolve_command("", &"".to_string()), "");
+    }
+
+    #[test]
+    fn resolve_args_layout_args_when_command_args_empty() {
+        let args: Vec<String> = vec!["-lh".to_string()];
+        assert_eq!(resolve_args(&vec!["".to_string()], &args), vec!["-lh"]);
+    }
+
+    #[test]
+    fn resolve_args_prefers_provided_args() {
+        let args: Vec<String> = vec!["-lh".to_string()];
+        assert_eq!(resolve_args(&vec!["aux".to_string()], &args), vec!["aux"]);
     }
 }
