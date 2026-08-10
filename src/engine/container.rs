@@ -1,14 +1,11 @@
 use nix::mount::{mount, umount2, MsFlags, MntFlags};
 use nix::sched::{clone, CloneFlags};
 use nix::sys::signal::Signal;
-use nix::unistd::{chroot, chdir, execvp, sethostname};
-use std::{fs, io};
+use nix::unistd::{chdir, execvp, sethostname};
 use std::ffi::CString;
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
-use nix::libc::getchar;
-use nix::NixPath;
-use rand::{Rng, RngExt};
+use std::fs;
+use std::path::Path;
+use rand::RngExt;
 use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::paths::RustockerPaths;
 
@@ -268,8 +265,13 @@ mod tests {
 
     #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
-        let args: Vec<String> = vec!["-lh".to_string()];
-        assert_eq!(resolve_args(&vec!["".to_string()], &args), vec!["-lh"]);
+        let layout_args: Vec<String> = vec!["-lh".to_string()];
+        assert_eq!(resolve_args(&vec![], &layout_args), vec!["-lh"]);
+    }
+
+    #[test]
+    fn resolve_args_empty_layout_args_and_empty_command_args() {
+        assert!(resolve_args(&vec![], &vec![]).is_empty());
     }
 
     #[test]

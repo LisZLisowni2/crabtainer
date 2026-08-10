@@ -86,3 +86,91 @@ async fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_run(args: &[&str]) -> Commands {
+        let mut full = vec!["rustocker", "run"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full).unwrap().command
+    }
+
+    #[test]
+    fn run_parses_cpu_and_memory_limits() {
+        match parse_run(&["my-layout", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
+            Commands::Run { layout, cpu_limit, memory_limit, command, args } => {
+                assert_eq!(layout, "my-layout");
+                assert_eq!(cpu_limit, Some(1.5));
+                assert_eq!(memory_limit, Some(2048.0));
+                assert_eq!(command, "/bin/sh");
+                assert!(args.is_empty());
+            }
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn run_limits_default_to_none() {
+        match parse_run(&["my-layout"]) {
+            Commands::Run { layout, cpu_limit, memory_limit, command, .. } => {
+                assert_eq!(layout, "my-layout");
+                assert_eq!(cpu_limit, None);
+                assert_eq!(memory_limit, None);
+                assert_eq!(command, "");
+            }
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn run_collects_trailing_args() {
+        match parse_run(&["my-layout", "-c", "/bin/sh", "echo", "hi"]) {
+            Commands::Run { args, command, .. } => {
+                assert_eq!(command, "/bin/sh");
+                assert_eq!(args, vec!["echo", "hi"]);
+            }
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn run_requires_command_when_args_given() {
+        let result = Cli::try_parse_from(["rustocker", "run", "my-layout", "some-arg"]);
+        assert!(result.is_err(), "expected error when args present without command");
+    }
+
+    #[test]
+    fn run_accepts_long_flag_forms() {
+        match parse_run(&["my-layout", "--cpu-limit", "0.5", "--memory-limit", "1024", "--command", "true"]) {
+            Commands::Run { cpu_limit, memory_limit, command, .. } => {
+                assert_eq!(cpu_limit, Some(0.5));
+                assert_eq!(memory_limit, Some(1024.0));
+                assert_eq!(command, "true");
+            }
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn build_parses_file_and_tag() {
+        let cli = Cli::try_parse_from(["rustocker", "build", "-f", "Rustockerfile.dev", "-t", "my-image"]).unwrap();
+        match cli.command {
+            Commands::Build { file, tag } => {
+                assert_eq!(file, "Rustockerfile.dev");
+                assert_eq!(tag, "my-image");
+            }
+            _ => panic!("expected Build command"),
+        }
+    }
+
+    #[test]
+    fn build_uses_default_file() {
+        let cli = Cli::try_parse_from(["rustocker", "build", "-t", "my-image"]).unwrap();
+        match cli.command {
+            Commands::Build { file, .. } => assert_eq!(file, "Rustockerfile"),
+            _ => panic!("expected Build command"),
+        }
+    }
+}

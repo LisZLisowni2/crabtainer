@@ -84,3 +84,29 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_opts() -> LayoutOpts {
+        LayoutOpts {
+            memory_limit: Some(2048.0),
+            cpu_limit: Some(1.5),
+            cmd: Some("/bin/sh".to_string()),
+            args: vec!["-c".to_string(), "echo hi".to_string()],
+        }
+    }
+
+    #[test]
+    fn layout_opts_serializes_round_trip() {
+        let opts = sample_opts();
+        let json = serde_json::to_string(&opts).unwrap();
+        let decoded: LayoutOpts = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.memory_limit, Some(2048.0));
+        assert_eq!(decoded.cpu_limit, Some(1.5));
+        assert_eq!(decoded.cmd, Some("/bin/sh".to_string()));
+        assert_eq!(decoded.args, vec!["-c".to_string(), "echo hi".to_string()]);
+    }
+}

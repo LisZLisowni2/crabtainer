@@ -101,7 +101,8 @@ async fn build_layout_processes_instructions_end_to_end() {
     assert!(config.is_file(), "config.json should be written");
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(json["cmd"], serde_json::json!([]), "no CMD instruction -> empty cmd");
+    assert_eq!(json["cmd"], serde_json::Value::Null, "no CMD instruction -> cmd is null");
+    assert_eq!(json["args"], serde_json::json!([]), "no CMD instruction -> empty args");
     assert!(json.get("rootfs").is_none(), "rootfs field was removed from config");
 }
 
@@ -121,7 +122,8 @@ async fn build_layout_injects_cmd_into_config_json() {
     let config = home.join("layouts").join("final").join("config.json");
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(json["cmd"], serde_json::json!(["/bin/sh", "-c"]));
+    assert_eq!(json["cmd"], serde_json::json!("/bin/sh"));
+    assert_eq!(json["args"], serde_json::json!(["-c"]));
 }
 
 #[tokio::test]

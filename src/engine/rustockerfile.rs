@@ -133,8 +133,8 @@ impl Rustockerfile {
                     }
 
                     parse_memory_limit(args)
-                        .map_err(|e| format!("Line {}: {}", line_num + 1, e)).ok();
-                    Instruction::MemoryLimit(args.to_string());
+                        .map_err(|e| format!("Line {}: {}", line_num + 1, e))?;
+                    instructions.push(Instruction::MemoryLimit(args.to_string()));
                 }
                 _ => {
                     return Err(format!("Line {}: Unknown keyword", line_num + 1));
@@ -161,11 +161,11 @@ CMD /bin/sh -c
 ";
         let parsed = Rustockerfile::parse(content).unwrap();
         assert_eq!(parsed.instructions, vec![
-            Instruction::From("alpine-base".to_string()),
             Instruction::Download {
                 url: "https://example.com/alpine.tar.gz".to_string(),
                 alias: "alpine-base".to_string(),
             },
+            Instruction::From("alpine-base".to_string()),
             Instruction::Copy { src: "src".to_string(), dst: "/app".to_string() },
             Instruction::Run("echo hello".to_string()),
             Instruction::Cmd { cmd: "/bin/sh".to_string(), args: vec!["-c".to_string()] },
@@ -267,5 +267,82 @@ CMD /bin/sh -c
     fn parse_from_file_missing_file_errors() {
         let err = Rustockerfile::parse_from_file("/does/not/exist/Rustockerfile").unwrap_err();
         assert!(err.contains("Error reading file"));
+    }
+
+    #[test]
+    fn cmd_splits_command_and_args() {
+        let parsed = Rustockerfile::parse("CMD /bin/sh -c echo hello\n").unwrap();
+        assert_eq!(parsed.instructions, vec![
+            Instruction::Cmd {
+                cmd: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "echo".to_string(), "hello".to_string()],
+            },
+        ]);
+    }
+
+    #[test]
+    fn cmd_with_single_word_has_empty_args() {
+        let parsed = Rustockerfile::parse("CMD ls\n").unwrap();
+        assert_eq!(parsed.instructions, vec![
+            Instruction::Cmd { cmd: "ls".to_string(), args: vec![] },
+        ]);
+    }
+
+    #[test]
+    fn cmd_splits_on_all_whitespace() {
+        let parsed = Rustockerfile::parse("CMD   python3   -m   http.server\n").unwrap();
+        assert_eq!(parsed.instructions, vec![
+            Instruction::Cmd {
+                cmd: "python3".to_string(),
+                args: vec!["-m".to_string(), "http.server".to_string()],
+            },
+        ]);
+    }
+
+    #[test]
+    fn cpu_limit_parses_and_validates() {
+        let parsed = Rustockerfile::parse("CPU_LIMIT 1.5\n").unwrap();
+        assert_eq!(parsed.instructions, vec![Instruction::CpuLimit(1.5)]);
+
+        let err = Rustockerfile::parse("CPU_LIMIT 0\n").unwrap_err();
+        assert!(err.contains("greater than 0"), "unexpected error: {}", err);
+
+        let err = Rustockerfile::parse("CPU_LIMIT abc\n").unwrap_err();
+        assert!(err.contains("must be a number"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn memory_limit_parses_and_records_raw_value() {
+        let parsed = Rustockerfile::parse("MEMORY_LIMIT 2g\n").unwrap();
+        assert_eq!(parsed.instructions, vec![Instruction::MemoryLimit("2g".to_string())]);
+    }
+
+    #[test]
+    fn memory_limit_validates_value() {
+        let err = Rustockerfile::parse("MEMORY_LIMIT not-a-size\n").unwrap_err();
+        assert!(err.contains("Line 1"), "unexpected error: {}", err);
+        assert!(err.contains("Invalid MEMORY_LIMIT"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn parse_memory_limit_handles_units() {
+        assert_eq!(parse_memory_limit("512m").unwrap(), 512.0 * 1024.0 * 1024.0);
+        assert_eq!(parse_memory_limit("2g").unwrap(), 2.0 * 1024.0 * 1024.0 * 1024.0);
+        assert_eq!(parse_memory_limit("1024k").unwrap(), 1024.0 * 1024.0);
+        assert_eq!(parse_memory_limit("8b").unwrap(), 8.0);
+        assert_eq!(parse_memory_limit("100").unwrap(), 100.0);
+    }
+
+    #[test]
+    fn parse_memory_limit_is_case_insensitive() {
+        assert_eq!(parse_memory_limit("2G").unwrap(), parse_memory_limit("2g").unwrap());
+        assert_eq!(parse_memory_limit("512M").unwrap(), parse_memory_limit("512m").unwrap());
+    }
+
+    #[test]
+    fn parse_memory_limit_rejects_invalid_values() {
+        assert!(parse_memory_limit("").is_err());
+        assert!(parse_memory_limit("abc").is_err());
+        assert!(parse_memory_limit("2x").is_err());
     }
 }
