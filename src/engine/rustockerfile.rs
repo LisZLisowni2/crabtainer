@@ -10,11 +10,36 @@ pub enum Instruction {
     Copy { src: String, dst: String },
     Run(String),
     Cmd(Vec<String>),
+    CpuLimit(f64),
+    MemoryLimit(String),
 }
 
 #[derive(Debug, Default)]
 pub struct Rustockerfile {
     pub instructions: Vec<Instruction>,
+}
+
+
+pub fn parse_memory_limit(s: &str) -> Result<f64, String> {
+    let lower = s.trim().to_lowercase();
+
+    let (num_part, mult): (&str, f64) = if let Some(n) = lower.strip_suffix('g') {
+        (n, 1024.0 * 1024.0 * 1024.0)
+    } else if let Some(n) = lower.strip_suffix('m') {
+        (n, 1024.0 * 1024.0)
+    } else if let Some(n) = lower.strip_suffix('k') {
+        (n, 1024.0)
+    } else if let Some(n) = lower.strip_suffix('b') {
+        (n, 1.0)
+    } else {
+        (lower.as_str(), 1.0)
+    };
+
+    num_part
+        .trim()
+        .parse::<f64>()
+        .map(|n| n * mult)
+        .map_err(|_| format!("Invalid MEMORY_LIMIT value: '{}' (expected e.g. '512m', '2g', or a byte count)", s))
 }
 
 impl Rustockerfile {
@@ -77,13 +102,36 @@ impl Rustockerfile {
                         return Err(format!("Line {}: Required argument (RUN)", line_num + 1));
                     }
                     instructions.push(Instruction::Run(args.to_string()));
-                }
+                },
                 "CMD" => {
                     if args.is_empty() {
                         return Err(format!("Line {}: Required argument (CMD)", line_num + 1));
                     }
                     let cmd_args = args.split_whitespace().map(|s| s.to_string()).collect();
                     instructions.push(Instruction::Cmd(cmd_args));
+                },
+                "CPU_LIMIT" => {
+                    if args.is_empty() {
+                        return Err(format!("Line {}: Required argument (CPU_LIMIT)", line_num + 1));
+                    }
+
+                    let cores = args.parse::<f64>()
+                        .map_err(|_| format!("Line {}: CPU_LIMIT must be a number (e.g. CPU_LIMIT 1.5)", line_num + 1))?;
+
+                    if cores <= 0.0 {
+                        return Err(format!("Line {}: CPU_LIMIT must be greater than 0", line_num + 1));
+                    }
+
+                    instructions.push(Instruction::CpuLimit(cores));
+                },
+                "MEMORY_LIMIT" => {
+                    if args.is_empty() {
+                        return Err(format!("Line {}: Required argument (MEMORY_LIMIT)", line_num + 1));
+                    }
+
+                    parse_memory_limit(args)
+                        .map_err(|e| format!("Line {}: {}", line_num + 1, e));
+                    Instruction::MemoryLimit(args.to_string());
                 }
                 _ => {
                     return Err(format!("Line {}: Unknown keyword", line_num + 1));

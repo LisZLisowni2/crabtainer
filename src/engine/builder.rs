@@ -1,4 +1,4 @@
-use crate::engine::rustockerfile::{Instruction, Rustockerfile};
+use crate::engine::rustockerfile::{parse_memory_limit, Instruction, Rustockerfile};
 use crate::engine::instructions::download::download_image_if_missing;
 use crate::engine::instructions::from::from_image;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,8 @@ use crate::engine::paths::RustockerPaths;
 
 #[derive(Serialize, Deserialize)]
 pub struct LayoutOpts {
+    pub memory_limit: Option<f64>,
+    pub cpu_limit: Option<f64>,
     pub cmd: Vec<String>,
 }
 
@@ -32,6 +34,8 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
     let mut count = 0;
     let steps = rustocker.instructions.len();
     let mut opts = LayoutOpts {
+        memory_limit: None,
+        cpu_limit: None,
         cmd: vec![]
     };
     
@@ -57,6 +61,15 @@ pub async fn build_layout(rustocker_file: String, output_layout_name: String) ->
             Instruction::Cmd(cmd) => {
                 println!(" => [{}/{}] CMD {:?}", count, steps, cmd);
                 opts.cmd = cmd;
+            },
+            Instruction::CpuLimit(cores) => {
+                println!(" => [{}/{}] CPU LIMIT {}", count, steps, cores);
+                opts.cpu_limit = Some(cores);
+            },
+            Instruction::MemoryLimit(limit) => {
+                println!(" => [{}/{}] MEMORY LIMIT {}", count, steps, limit);
+                let bytes = parse_memory_limit(limit.as_str())?;
+                opts.memory_limit = Some(bytes);
             }
         }
     }
