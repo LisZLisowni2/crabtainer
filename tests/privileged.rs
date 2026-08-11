@@ -125,15 +125,13 @@ async fn run_container_requires_root_and_overlayfs() {
     let config = rustocker::engine::builder::LayoutOpts {
         cpu_limit: None,
         memory_limit: None,
-        cmd: Some("/bin/sh".to_string()),
-        args: vec!["-c".to_string(), "true".to_string()],
+        args: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
     };
     std::fs::write(&layout_config, serde_json::to_string(&config).unwrap()).unwrap();
 
     let opts = ContainerOptions {
         layout_name: "layout-a".to_string(),
-        command: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), "true".to_string()],
+        args: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
         cpu_limit: None,
         memory_limit: None,
     };

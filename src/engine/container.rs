@@ -12,7 +12,6 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct ContainerOptions {
     pub layout_name: String,
-    pub command: String,
     pub args: Vec<String>,
     pub cpu_limit: Option<f64>,
     pub memory_limit: Option<f64>,
@@ -24,14 +23,6 @@ pub(crate) fn generate_container_id() -> String {
     let bytes: [u8; 6] = rng.random();
 
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-pub(crate) fn resolve_command(command: &str, layout_cmd: &String) -> String {
-    if command.is_empty() {
-        layout_cmd.to_string()
-    } else {
-        command.to_string()
-    }
 }
 
 pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
@@ -61,7 +52,6 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
             .as_str(),
     )
     .unwrap();
-    let command = resolve_command(&opts.command, &layout_opts.cmd.unwrap());
     let args = resolve_args(&opts.args, &layout_opts.args);
     let cpu_limit = opts.cpu_limit.or(layout_opts.cpu_limit);
     let memory_limit = opts.memory_limit.or(layout_opts.memory_limit);
@@ -101,7 +91,6 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     let final_opts = ContainerOptions {
         layout_name: opts.layout_name,
         args,
-        command,
         cpu_limit,
         memory_limit,
     };
@@ -221,7 +210,7 @@ fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOption
         eprintln!("[WARN] Failed to remove old root: {}", e);
     }
 
-    let cmd_cstring = CString::new(options.command.clone()).unwrap();
+    let cmd_cstring = CString::new("/bin/sh").unwrap();
     let mut args_cstring = vec![cmd_cstring.clone()];
     for arg in &options.args {
         args_cstring.push(CString::new(arg.clone()).unwrap());
@@ -244,24 +233,7 @@ mod tests {
             assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
         }
     }
-
-    #[test]
-    fn resolve_command_uses_layout_cmd_when_command_empty() {
-        let cmd = "ls".to_string();
-        assert_eq!(resolve_command("", &cmd), "ls");
-    }
-
-    #[test]
-    fn resolve_command_prefers_provided_command() {
-        let cmd = "find".to_string();
-        assert_eq!(resolve_command("ls", &cmd), "ls");
-    }
-
-    #[test]
-    fn resolve_command_empty_cmd_yields_empty_string() {
-        assert_eq!(resolve_command("", &"".to_string()), "");
-    }
-
+    
     #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];

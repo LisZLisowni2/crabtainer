@@ -73,8 +73,7 @@ mod tests {
     fn opts(cpu: Option<f64>, mem: Option<f64>) -> ContainerOptions {
         ContainerOptions {
             layout_name: "test".to_string(),
-            command: "true".to_string(),
-            args: vec![],
+            args: vec!["true".to_string()],
             cpu_limit: cpu,
             memory_limit: mem,
         }

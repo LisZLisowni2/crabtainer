@@ -7,7 +7,7 @@ pub enum Instruction {
     From(String),
     Copy { src: String, dst: String },
     Run(String),
-    Cmd { cmd: String, args: Vec<String> },
+    Cmd { args: Vec<String> },
     CpuLimit(f64),
     MemoryLimit(String),
 }
@@ -115,8 +115,7 @@ impl Rustockerfile {
                     let cmd_args: Vec<String> =
                         args.split_whitespace().map(|s| s.to_string()).collect();
                     instructions.push(Instruction::Cmd {
-                        cmd: cmd_args[0].clone(),
-                        args: cmd_args[1..].to_vec(),
+                        args: cmd_args
                     });
                 }
                 "CPU_LIMIT" => {
@@ -193,8 +192,7 @@ CMD /bin/sh -c
                 },
                 Instruction::Run("echo hello".to_string()),
                 Instruction::Cmd {
-                    cmd: "/bin/sh".to_string(),
-                    args: vec!["-c".to_string()]
+                    args: vec!["/bin/sh".to_string(), "-c".to_string()]
                 },
             ]
         );
@@ -316,8 +314,7 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "/bin/sh".to_string(),
-                args: vec!["-c".to_string(), "echo".to_string(), "hello".to_string()],
+                args: vec!["/bin/sh".to_string(), "-c".to_string(), "echo".to_string(), "hello".to_string()],
             },]
         );
     }
@@ -328,8 +325,7 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "ls".to_string(),
-                args: vec![]
+                args: vec!["ls".to_string()]
             },]
         );
     }
@@ -340,8 +336,7 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "python3".to_string(),
-                args: vec!["-m".to_string(), "http.server".to_string()],
+                args: vec!["python3".to_string(), "-m".to_string(), "http.server".to_string()],
             },]
         );
     }

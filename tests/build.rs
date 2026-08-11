@@ -225,8 +225,7 @@ async fn run_container_errors_when_layout_missing() {
 
     let opts = ContainerOptions {
         layout_name: "does-not-exist".to_string(),
-        command: "/bin/true".to_string(),
-        args: vec![],
+        args: vec!["/bin/true".to_string()],
         cpu_limit: None,
         memory_limit: None,
     };
