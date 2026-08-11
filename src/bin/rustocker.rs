@@ -21,15 +21,15 @@ enum Commands {
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
-        #[arg(short, long, default_value = "")]
-        command: String,
+        #[arg(short, long)]
+        command: Option<String>,
 
         #[arg(
             trailing_var_arg = true,
             allow_hyphen_values = true,
             requires = "command"
         )]
-        args: Vec<String>,
+        args: Option<Vec<String>>,
     },
     Build {
         #[arg(short, long, default_value = "Rustockerfile")]
@@ -58,12 +58,19 @@ async fn main() {
             cpu_limit,
             memory_limit
         } => {
-            let mut cmd = vec![command];
-            cmd.extend(args);
+            let mut final_command: Vec<String> = vec![];
+
+            if let Some(cmd) = command {
+                final_command.push(cmd);
+            }
+
+            if let Some(arguments) = args {
+                final_command.extend(arguments);
+            }
 
             let options = ContainerOptions {
                 layout_name: layout,
-                args: cmd,
+                args: final_command,
                 cpu_limit,
                 memory_limit,
             };

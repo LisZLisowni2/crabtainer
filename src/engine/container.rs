@@ -43,19 +43,27 @@ pub(crate) fn resolve_args(args: &[String], layout_args: &Vec<String>) -> Vec<St
     }
 }
 
-pub(crate) fn resolve_cpu_limit(cpu_limit: &f64, layout_cpu_limit: Option<i64>) -> i64 {
-    if let Some(cpu) = layout_cpu_limit {
-        cpu
+pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
+    if let Some(cpu) = cpu_limit {
+        (*cpu as i64) * 100000i64
     } else {
-        (*cpu_limit * 100000f64) as i64
+        if let Some(cpu) = layout_cpu_limit {
+            cpu
+        } else {
+            100000
+        }
     }
 }
 
-pub(crate) fn resolve_memory_limit(memory_limit: &f64, layout_memory_limit: Option<i64>) -> i64 {
-    if let Some(memory) = layout_memory_limit {
-        memory
+pub(crate) fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
+    if let Some(memory) = memory_limit {
+        *memory as i64
     } else {
-        *memory_limit as i64
+        if let Some(memory) = layout_memory_limit {
+            memory
+        } else {
+            100000
+        }
     }
 }
 
@@ -96,12 +104,12 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     let args = resolve_args(&opts.args, default_args.unwrap());
 
     let cpu_limit = resolve_cpu_limit(
-        &opts.cpu_limit.unwrap(),
+        &opts.cpu_limit,
         default_cpu
     );
 
     let memory_limit = resolve_memory_limit(
-        &opts.memory_limit.unwrap(),
+        &opts.memory_limit,
         default_memory,
     );
 
@@ -259,9 +267,9 @@ fn child_process(rootfs: &Path, container_id: &String, options: &ContainerReady)
         eprintln!("[WARN] Failed to remove old root: {}", e);
     }
 
-    let cmd_cstring = CString::new("/bin/sh").unwrap();
+    let cmd_cstring = CString::new(options.args[0].clone()).unwrap();
     let mut args_cstring = vec![cmd_cstring.clone()];
-    for arg in &options.args {
+    for arg in &options.args[1..] {
         args_cstring.push(CString::new(arg.clone()).unwrap());
     }
 
