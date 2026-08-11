@@ -46,7 +46,7 @@ body:
       description: Copy and paste relevant terminal output, backtraces, or drop screenshots here.
       render: shell
 
-  - type: textarea
+  - type: input
     id: os
     attributes:
       label: Operating System
