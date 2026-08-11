@@ -3,7 +3,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Download { image_ref: String },
+    Download { image_ref: String, alias: String },
     From(String),
     Copy { src: String, dst: String },
     Run(String),
@@ -74,15 +74,14 @@ impl Rustockerfile {
 
                     let parts: Vec<&str> = args.split_whitespace().collect();
                     if parts.len() == 3 && parts[1].to_uppercase() == "AS" {
-                        instructions.push(Instruction::Download {
+                        instructions.push(Instruction::Download { 
                             image_ref: parts[0].to_string(),
-                        })
-                    } else {
-                        return Err(format!(
-                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <URL> AS <ALIAS>",
-                            line_num + 1
-                        ));
+                            alias: parts[2].to_string(),
+                        });
+                    } else { 
+                        return Err(format!("Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS>", line_num + 1));
                     }
+
                 }
                 "FROM" => {
                     if args.is_empty() {
@@ -170,8 +169,8 @@ mod tests {
     #[test]
     fn parses_all_instruction_types() {
         let content = "\
-DOWNLOAD ubuntu:latest
-FROM ubuntu:latest
+DOWNLOAD ubuntu:latest AS ubuntu
+FROM ubuntu
 COPY src /app
 RUN echo hello
 CMD /bin/sh -c
@@ -182,8 +181,9 @@ CMD /bin/sh -c
             vec![
                 Instruction::Download {
                     image_ref: "ubuntu:latest".to_string(),
+                    alias: "ubuntu".to_string(),
                 },
-                Instruction::From("alpine-base".to_string()),
+                Instruction::From("ubuntu:latest".to_string()),
                 Instruction::Copy {
                     src: "src".to_string(),
                     dst: "/app".to_string()

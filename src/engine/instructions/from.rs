@@ -58,9 +58,16 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
         let tar_decoder = flate2::read::GzDecoder::new(tar_gz);
         let mut archive = tar::Archive::new(tar_decoder);
 
-        archive
-            .unpack(&layer_path)
-            .map_err(|e| format!("=> [FROM] Failed to unpack layer '{:?}': {}", layer_path, e))?;
+        archive.set_preserve_permissions(true);
+        archive.set_unpack_xattrs(true);
+
+        for entry_result in archive.entries().map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))? {
+            let mut entry = entry_result.map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))?;
+
+            if let Err(e) = entry.unpack_in(&target_rootfs) {
+                eprintln!("       [WARN] Non-fatal unpack issue on {:?}: {}", entry.path().unwrap_or_default(), e);
+            }
+        }
 
         let src_config = image_path.join("config.json");
         if src_config.exists() {

@@ -1,6 +1,6 @@
-DOWNLOAD ubuntu:latest
+DOWNLOAD ubuntu:latest AS ubuntu
 
-FROM ubuntu:latest
+FROM ubuntu
 
 RUN mkdir test
 

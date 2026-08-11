@@ -56,11 +56,11 @@ async fn main() {
             command,
             args,
             cpu_limit,
-            memory_limit,
+            memory_limit
         } => {
             let mut cmd = vec![command];
             cmd.extend(args);
-            
+
             let options = ContainerOptions {
                 layout_name: layout,
                 args: cmd,

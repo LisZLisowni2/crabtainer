@@ -8,6 +8,8 @@ use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
+use clap::arg;
+use oci_spec::runtime::Spec;
 
 #[derive(Debug)]
 pub struct ContainerOptions {
@@ -15,6 +17,14 @@ pub struct ContainerOptions {
     pub args: Vec<String>,
     pub cpu_limit: Option<f64>,
     pub memory_limit: Option<f64>,
+}
+
+#[derive(Debug)]
+pub struct ContainerReady {
+    pub layout_name: String,
+    pub args: Vec<String>,
+    pub quota: Option<i64>,
+    pub memory_limit: Option<i64>,
 }
 
 pub(crate) fn generate_container_id() -> String {
@@ -25,11 +35,27 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
+pub(crate) fn resolve_args(args: &[String], layout_args: &Vec<String>) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
         args.to_vec()
+    }
+}
+
+pub(crate) fn resolve_cpu_limit(cpu_limit: &f64, layout_cpu_limit: Option<i64>) -> i64 {
+    if let Some(cpu) = layout_cpu_limit {
+        cpu
+    } else {
+        (*cpu_limit * 100000f64) as i64
+    }
+}
+
+pub(crate) fn resolve_memory_limit(memory_limit: &f64, layout_memory_limit: Option<i64>) -> i64 {
+    if let Some(memory) = layout_memory_limit {
+        memory
+    } else {
+        *memory_limit as i64
     }
 }
 
@@ -46,15 +72,38 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     }
     let layout_rootfs = layout_dir.join("rootfs");
 
-    let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(
-        fs::read_to_string(layout_dir.join("config.json"))
-            .unwrap()
-            .as_str(),
-    )
-    .unwrap();
-    let args = resolve_args(&opts.args, &layout_opts.args);
-    let cpu_limit = opts.cpu_limit.or(layout_opts.cpu_limit);
-    let memory_limit = opts.memory_limit.or(layout_opts.memory_limit);
+    let layout_opts: oci_spec::runtime::Spec = Spec::load(layout_dir.join("config.json")).unwrap();
+
+    let default_args = layout_opts
+        .process()
+        .as_ref()
+        .and_then(|p| p.args().as_ref());
+
+    let default_cpu = layout_opts
+        .linux()
+        .as_ref()
+        .and_then(|l| l.resources().as_ref())
+        .and_then(|r| r.cpu().as_ref())
+        .and_then(|c| c.quota());
+
+    let default_memory = layout_opts
+        .linux().as_ref()
+        .and_then(|l| l.resources().as_ref())
+        .and_then(|r| r.memory().as_ref())
+        .and_then(|m| m.limit());
+
+
+    let args = resolve_args(&opts.args, default_args.unwrap());
+
+    let cpu_limit = resolve_cpu_limit(
+        &opts.cpu_limit.unwrap(),
+        default_cpu
+    );
+
+    let memory_limit = resolve_memory_limit(
+        &opts.memory_limit.unwrap(),
+        default_memory,
+    );
 
     let container_id = generate_container_id();
 
@@ -88,11 +137,11 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     println!("[HOST] Starting container {}", container_id);
 
-    let final_opts = ContainerOptions {
+    let final_opts = ContainerReady {
         layout_name: opts.layout_name,
         args,
-        cpu_limit,
-        memory_limit,
+        quota: Some(cpu_limit),
+        memory_limit: Some(memory_limit),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts).await?;
@@ -142,7 +191,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOptions) -> isize {
+fn child_process(rootfs: &Path, container_id: &String, options: &ContainerReady) -> isize {
     sethostname(container_id).ok();
 
     if let Err(e) = mount(
@@ -233,7 +282,7 @@ mod tests {
             assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
         }
     }
-    
+
     #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
