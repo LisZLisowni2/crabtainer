@@ -1,7 +1,5 @@
-use std::fmt::format;
 use std::fs;
 use std::path::Path;
-use nix::NixPath;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -9,7 +7,7 @@ pub enum Instruction {
     From(String),
     Copy { src: String, dst: String },
     Run(String),
-    Cmd{ cmd: String, args: Vec<String> },
+    Cmd { cmd: String, args: Vec<String> },
     CpuLimit(f64),
     MemoryLimit(String),
 }
@@ -18,7 +16,6 @@ pub enum Instruction {
 pub struct Rustockerfile {
     pub instructions: Vec<Instruction>,
 }
-
 
 pub fn parse_memory_limit(s: &str) -> Result<f64, String> {
     let lower = s.trim().to_lowercase();
@@ -39,13 +36,18 @@ pub fn parse_memory_limit(s: &str) -> Result<f64, String> {
         .trim()
         .parse::<f64>()
         .map(|n| n * mult)
-        .map_err(|_| format!("Invalid MEMORY_LIMIT value: '{}' (expected e.g. '512m', '2g', or a byte count)", s))
+        .map_err(|_| {
+            format!(
+                "Invalid MEMORY_LIMIT value: '{}' (expected e.g. '512m', '2g', or a byte count)",
+                s
+            )
+        })
 }
 
 impl Rustockerfile {
     pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("Error reading file: {:?}", e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Error reading file: {:?}", e))?;
 
         Self::parse(&content)
     }
@@ -74,18 +76,21 @@ impl Rustockerfile {
                     if parts.len() == 3 && parts[1].to_uppercase() == "AS" {
                         instructions.push(Instruction::Download {
                             url: parts[0].to_string(),
-                            alias: parts[2].to_string()
+                            alias: parts[2].to_string(),
                         })
                     } else {
-                        return Err(format!("Line {}: DOWNLOAD syntax requires format: DOWNLOAD <URL> AS <ALIAS>", line_num + 1));
+                        return Err(format!(
+                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <URL> AS <ALIAS>",
+                            line_num + 1
+                        ));
                     }
-                },
+                }
                 "FROM" => {
                     if args.is_empty() {
                         return Err(format!("Line {}: Image name required (FROM)", line_num + 1));
                     }
                     instructions.push(Instruction::From(args.to_string()));
-                },
+                }
                 "COPY" => {
                     let copy_parts: Vec<&str> = args.split_whitespace().collect();
                     if copy_parts.len() != 2 {
@@ -96,40 +101,54 @@ impl Rustockerfile {
                         src: copy_parts[0].to_string(),
                         dst: copy_parts[1].to_string(),
                     })
-                },
+                }
                 "RUN" => {
                     if args.is_empty() {
                         return Err(format!("Line {}: Required argument (RUN)", line_num + 1));
                     }
                     instructions.push(Instruction::Run(args.to_string()));
-                },
+                }
                 "CMD" => {
                     if args.is_empty() {
                         return Err(format!("Line {}: Required argument (CMD)", line_num + 1));
                     }
-                    let cmd_args: Vec<String> = args.split_whitespace().map(|s| s.to_string()).collect();
+                    let cmd_args: Vec<String> =
+                        args.split_whitespace().map(|s| s.to_string()).collect();
                     instructions.push(Instruction::Cmd {
                         cmd: cmd_args[0].clone(),
                         args: cmd_args[1..].to_vec(),
                     });
-                },
+                }
                 "CPU_LIMIT" => {
                     if args.is_empty() {
-                        return Err(format!("Line {}: Required argument (CPU_LIMIT)", line_num + 1));
+                        return Err(format!(
+                            "Line {}: Required argument (CPU_LIMIT)",
+                            line_num + 1
+                        ));
                     }
 
-                    let cores = args.parse::<f64>()
-                        .map_err(|_| format!("Line {}: CPU_LIMIT must be a number (e.g. CPU_LIMIT 1.5)", line_num + 1))?;
+                    let cores = args.parse::<f64>().map_err(|_| {
+                        format!(
+                            "Line {}: CPU_LIMIT must be a number (e.g. CPU_LIMIT 1.5)",
+                            line_num + 1
+                        )
+                    })?;
 
                     if cores <= 0.0 {
-                        return Err(format!("Line {}: CPU_LIMIT must be greater than 0", line_num + 1));
+                        return Err(format!(
+                            "Line {}: CPU_LIMIT must be greater than 0",
+                            line_num + 1
+                        ));
                     }
 
                     instructions.push(Instruction::CpuLimit(cores));
-                },
+                }
                 "MEMORY_LIMIT" => {
                     if args.is_empty() {
-                        return Err(format!("Line {}: Required argument (MEMORY_LIMIT)", line_num + 1));
+                        return Err(format!(
+                            "Line {}: Required argument (MEMORY_LIMIT)",
+                            line_num + 1
+                        ));
                     }
 
                     parse_memory_limit(args)
@@ -160,26 +179,41 @@ RUN echo hello
 CMD /bin/sh -c
 ";
         let parsed = Rustockerfile::parse(content).unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::Download {
-                url: "https://example.com/alpine.tar.gz".to_string(),
-                alias: "alpine-base".to_string(),
-            },
-            Instruction::From("alpine-base".to_string()),
-            Instruction::Copy { src: "src".to_string(), dst: "/app".to_string() },
-            Instruction::Run("echo hello".to_string()),
-            Instruction::Cmd { cmd: "/bin/sh".to_string(), args: vec!["-c".to_string()] },
-        ]);
+        assert_eq!(
+            parsed.instructions,
+            vec![
+                Instruction::Download {
+                    url: "https://example.com/alpine.tar.gz".to_string(),
+                    alias: "alpine-base".to_string(),
+                },
+                Instruction::From("alpine-base".to_string()),
+                Instruction::Copy {
+                    src: "src".to_string(),
+                    dst: "/app".to_string()
+                },
+                Instruction::Run("echo hello".to_string()),
+                Instruction::Cmd {
+                    cmd: "/bin/sh".to_string(),
+                    args: vec!["-c".to_string()]
+                },
+            ]
+        );
     }
 
     #[test]
     fn keywords_are_case_insensitive() {
         let parsed = Rustockerfile::parse("from ubuntu\ncopy a /b\nrun ls\n").unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::From("ubuntu".to_string()),
-            Instruction::Copy { src: "a".to_string(), dst: "/b".to_string() },
-            Instruction::Run("ls".to_string()),
-        ]);
+        assert_eq!(
+            parsed.instructions,
+            vec![
+                Instruction::From("ubuntu".to_string()),
+                Instruction::Copy {
+                    src: "a".to_string(),
+                    dst: "/b".to_string()
+                },
+                Instruction::Run("ls".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -215,7 +249,8 @@ CMD /bin/sh -c
         assert!(err.contains("Line 1"));
         assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
 
-        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz WRONG alias\n").unwrap_err();
+        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz WRONG alias\n")
+            .unwrap_err();
         assert!(err.contains("Line 1"));
         assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
     }
@@ -248,9 +283,12 @@ CMD /bin/sh -c
     #[test]
     fn preserves_run_command_including_spaces() {
         let parsed = Rustockerfile::parse("RUN apk add --no-cache curl && echo done\n").unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::Run("apk add --no-cache curl && echo done".to_string()),
-        ]);
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::Run(
+                "apk add --no-cache curl && echo done".to_string()
+            ),]
+        );
     }
 
     #[test]
@@ -260,7 +298,10 @@ CMD /bin/sh -c
         std::fs::write(&path, "FROM ubuntu\n").unwrap();
 
         let parsed = Rustockerfile::parse_from_file(&path).unwrap();
-        assert_eq!(parsed.instructions, vec![Instruction::From("ubuntu".to_string())]);
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::From("ubuntu".to_string())]
+        );
     }
 
     #[test]
@@ -272,31 +313,37 @@ CMD /bin/sh -c
     #[test]
     fn cmd_splits_command_and_args() {
         let parsed = Rustockerfile::parse("CMD /bin/sh -c echo hello\n").unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::Cmd {
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::Cmd {
                 cmd: "/bin/sh".to_string(),
                 args: vec!["-c".to_string(), "echo".to_string(), "hello".to_string()],
-            },
-        ]);
+            },]
+        );
     }
 
     #[test]
     fn cmd_with_single_word_has_empty_args() {
         let parsed = Rustockerfile::parse("CMD ls\n").unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::Cmd { cmd: "ls".to_string(), args: vec![] },
-        ]);
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::Cmd {
+                cmd: "ls".to_string(),
+                args: vec![]
+            },]
+        );
     }
 
     #[test]
     fn cmd_splits_on_all_whitespace() {
         let parsed = Rustockerfile::parse("CMD   python3   -m   http.server\n").unwrap();
-        assert_eq!(parsed.instructions, vec![
-            Instruction::Cmd {
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::Cmd {
                 cmd: "python3".to_string(),
                 args: vec!["-m".to_string(), "http.server".to_string()],
-            },
-        ]);
+            },]
+        );
     }
 
     #[test]
@@ -308,26 +355,40 @@ CMD /bin/sh -c
         assert!(err.contains("greater than 0"), "unexpected error: {}", err);
 
         let err = Rustockerfile::parse("CPU_LIMIT abc\n").unwrap_err();
-        assert!(err.contains("must be a number"), "unexpected error: {}", err);
+        assert!(
+            err.contains("must be a number"),
+            "unexpected error: {}",
+            err
+        );
     }
 
     #[test]
     fn memory_limit_parses_and_records_raw_value() {
         let parsed = Rustockerfile::parse("MEMORY_LIMIT 2g\n").unwrap();
-        assert_eq!(parsed.instructions, vec![Instruction::MemoryLimit("2g".to_string())]);
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::MemoryLimit("2g".to_string())]
+        );
     }
 
     #[test]
     fn memory_limit_validates_value() {
         let err = Rustockerfile::parse("MEMORY_LIMIT not-a-size\n").unwrap_err();
         assert!(err.contains("Line 1"), "unexpected error: {}", err);
-        assert!(err.contains("Invalid MEMORY_LIMIT"), "unexpected error: {}", err);
+        assert!(
+            err.contains("Invalid MEMORY_LIMIT"),
+            "unexpected error: {}",
+            err
+        );
     }
 
     #[test]
     fn parse_memory_limit_handles_units() {
         assert_eq!(parse_memory_limit("512m").unwrap(), 512.0 * 1024.0 * 1024.0);
-        assert_eq!(parse_memory_limit("2g").unwrap(), 2.0 * 1024.0 * 1024.0 * 1024.0);
+        assert_eq!(
+            parse_memory_limit("2g").unwrap(),
+            2.0 * 1024.0 * 1024.0 * 1024.0
+        );
         assert_eq!(parse_memory_limit("1024k").unwrap(), 1024.0 * 1024.0);
         assert_eq!(parse_memory_limit("8b").unwrap(), 8.0);
         assert_eq!(parse_memory_limit("100").unwrap(), 100.0);
@@ -335,8 +396,14 @@ CMD /bin/sh -c
 
     #[test]
     fn parse_memory_limit_is_case_insensitive() {
-        assert_eq!(parse_memory_limit("2G").unwrap(), parse_memory_limit("2g").unwrap());
-        assert_eq!(parse_memory_limit("512M").unwrap(), parse_memory_limit("512m").unwrap());
+        assert_eq!(
+            parse_memory_limit("2G").unwrap(),
+            parse_memory_limit("2g").unwrap()
+        );
+        assert_eq!(
+            parse_memory_limit("512M").unwrap(),
+            parse_memory_limit("512m").unwrap()
+        );
     }
 
     #[test]

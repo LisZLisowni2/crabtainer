@@ -1,8 +1,7 @@
-use std::fs;
-use std::fs::{DirEntry, ReadDir};
-use std::path::{Path, PathBuf};
 use crate::engine::paths::RustockerPaths;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::fs;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub struct RustockerIgnore {
@@ -86,12 +85,13 @@ impl RustockerIgnore {
             } else {
                 true
             }
-        }) {
-            if let Ok(entry) = entry {
-                if entry.file_type().is_file() {
-                    let rel = entry.path().strip_prefix(&self.root).unwrap_or(entry.path());
-                    files.push(rel.to_path_buf());
-                }
+        }).flatten() {
+            if entry.file_type().is_file() {
+                let rel = entry
+                    .path()
+                    .strip_prefix(&self.root)
+                    .unwrap_or(entry.path());
+                files.push(rel.to_path_buf());
             }
         }
 
@@ -100,17 +100,20 @@ impl RustockerIgnore {
 }
 
 pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> Result<(), String> {
-    let dst_relative = Path::new(&dst)
-        .strip_prefix("/")
-        .unwrap_or(Path::new(&dst));
+    let dst_relative = Path::new(&dst).strip_prefix("/").unwrap_or(Path::new(&dst));
 
     let destination = RustockerPaths::layout_store_dir()
         .join(output_layout_name)
         .join("rootfs")
-        .join(&dst_relative);
+        .join(dst_relative);
 
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent).map_err(|err| format!(" => [COPY] Failed to create directories: {}", err.to_string()))?;
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                " => [COPY] Failed to create directories: {}",
+                err
+            )
+        })?;
     }
 
     let mut ignore: Vec<String> = Vec::new();
@@ -134,8 +137,13 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
             let target_path = destination.join(&rel_path);
 
             if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!(" => [COPY] Failed to create dir {}: {}", parent.display(), e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        " => [COPY] Failed to create dir {}: {}",
+                        parent.display(),
+                        e
+                    )
+                })?;
             }
 
             fs::copy(&rel_path, &target_path)
@@ -163,9 +171,7 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
 
     for src_path in entries {
         // Normalize path relative to workspace root for ignore checking
-        let rel_path = src_path
-            .strip_prefix("./")
-            .unwrap_or(&src_path);
+        let rel_path = src_path.strip_prefix("./").unwrap_or(&src_path);
 
         // Skip ignored paths
         if ignore_engine.is_ignored(rel_path) {
@@ -179,19 +185,30 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
             for rel_file in files {
                 let target_path = destination.join(&rel_file);
                 if let Some(parent) = target_path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| format!(" => [COPY] Failed to create dir {}: {}", parent.display(), e))?;
+                    fs::create_dir_all(parent).map_err(|e| {
+                        format!(
+                            " => [COPY] Failed to create dir {}: {}",
+                            parent.display(),
+                            e
+                        )
+                    })?;
                 }
-                fs::copy(&rel_file, &target_path)
-                    .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e))?;
+                fs::copy(&rel_file, &target_path).map_err(|e| {
+                    format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e)
+                })?;
             }
         } else if src_path.is_file() {
             // Replicate relative structure under destination
             let target_path = destination.join(rel_path);
 
             if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!(" => [COPY] Failed to create dir {}: {}", parent.display(), e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        " => [COPY] Failed to create dir {}: {}",
+                        parent.display(),
+                        e
+                    )
+                })?;
             }
 
             fs::copy(&src_path, &target_path)

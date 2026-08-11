@@ -13,7 +13,10 @@ pub fn isolated_home() -> EnvScope {
     let home = tempfile::tempdir().unwrap();
     // SAFETY: serialized behind ENV_LOCK so no other thread touches this env var.
     unsafe { std::env::set_var("RUSTOCKER_HOME", home.path()) };
-    EnvScope { _guard: guard, home }
+    EnvScope {
+        _guard: guard,
+        home,
+    }
 }
 
 impl EnvScope {
@@ -44,7 +47,13 @@ pub fn create_tarball(home: &Path, base_image_alias: &str, entries: &[(&str, &st
 
     let tar_path = img_dir.join(format!("{}.tar.gz", base_image_alias));
     let status = std::process::Command::new("tar")
-        .args(["-czf", tar_path.to_str().unwrap(), "-C", src.to_str().unwrap(), "."])
+        .args([
+            "-czf",
+            tar_path.to_str().unwrap(),
+            "-C",
+            src.to_str().unwrap(),
+            ".",
+        ])
         .status()
         .unwrap();
     assert!(status.success(), "failed to create test tarball");

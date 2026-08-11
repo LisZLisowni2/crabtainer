@@ -1,10 +1,13 @@
+use crate::engine::paths::RustockerPaths;
 use futures_util::StreamExt;
 use reqwest::Client;
-use tokio::fs::{File};
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use crate::engine::paths::RustockerPaths;
 
-pub async fn download_image_if_missing(url: &str, alias: &str) -> Result<std::path::PathBuf, String> {
+pub async fn download_image_if_missing(
+    url: &str,
+    alias: &str,
+) -> Result<std::path::PathBuf, String> {
     RustockerPaths::init_system_dirs()?;
 
     let storage_dir = RustockerPaths::image_store_dir();
@@ -26,7 +29,10 @@ pub async fn download_image_if_missing(url: &str, alias: &str) -> Result<std::pa
         .map_err(|e| format!("Error downloading image: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("Error downloading image: {}", response.text().await.unwrap()));
+        return Err(format!(
+            "Error downloading image: {}",
+            response.text().await.unwrap()
+        ));
     }
 
     let total_size = response.content_length().unwrap_or(0);
@@ -55,7 +61,9 @@ pub async fn download_image_if_missing(url: &str, alias: &str) -> Result<std::pa
         pb.inc(chunk.len() as u64);
     }
 
-    file.flush().await.map_err(|e| format!("Error flushing file: {}", e))?;
+    file.flush()
+        .await
+        .map_err(|e| format!("Error flushing file: {}", e))?;
     println!(" => [DOWNLOAD] Image '{}' successfully downloaded", alias);
 
     Ok(target_path)
