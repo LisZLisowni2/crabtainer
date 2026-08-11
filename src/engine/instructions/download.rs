@@ -13,6 +13,7 @@ pub async fn download_image_if_missing(
     let storage_dir = RustockerPaths::image_store_dir();
 
     let target_path = storage_dir.join(format!("{}.tar.gz", alias));
+    let temp_path = storage_dir.join(format!("{}.tar.gz.temp", alias));
 
     if target_path.exists() {
         println!(" => [DOWNLOAD] Image '{}' already exists", alias);
@@ -45,25 +46,39 @@ pub async fn download_image_if_missing(
             .progress_chars("#>-")
     );
 
-    let mut file = File::create(&target_path)
+    let mut file = File::create(&temp_path)
         .await
         .map_err(|e| format!("Error creating file: {}", e))?;
 
     let mut stream = response.bytes_stream();
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Error reading chunk: {}", e))?;
+        let chunk = match chunk_result {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let _ = std::fs::remove_file(&temp_path).unwrap();
+                return Err(format!("Error downloading image: {}", e));
+            }
+        };
 
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("Error writing to file: {}", e))?;
+        if let Err(e) = file.write_all(&chunk).await {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("Error writing to file: {}", e));
+        }
 
         pb.inc(chunk.len() as u64);
     }
 
-    file.flush()
-        .await
-        .map_err(|e| format!("Error flushing file: {}", e))?;
+    if let Err(e) = file.flush().await {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("Error flushing file: {}", e));
+    }
+
+    pb.finish_with_message("Download complete");
+
+    std::fs::rename(&temp_path, &target_path)
+        .map_err(|e| format!("Error renaming file: {}", e))?;
+
     println!(" => [DOWNLOAD] Image '{}' successfully downloaded", alias);
 
     Ok(target_path)
