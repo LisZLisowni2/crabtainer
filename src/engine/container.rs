@@ -307,4 +307,44 @@ mod tests {
         let args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&vec!["aux".to_string()], &args), vec!["aux"]);
     }
+
+    #[test]
+    fn resolve_cpu_limit_uses_cli_quota_when_given() {
+        assert_eq!(resolve_cpu_limit(&Some(2.0), None), 200000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_uses_layout_quota_when_no_cli() {
+        assert_eq!(resolve_cpu_limit(&None, Some(50000)), 50000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_defaults_when_nothing_given() {
+        assert_eq!(resolve_cpu_limit(&None, None), 100000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_cli_takes_precedence_over_layout() {
+        assert_eq!(resolve_cpu_limit(&Some(2.0), Some(50000)), 200000);
+    }
+
+    #[test]
+    fn resolve_memory_limit_uses_cli_limit_when_given() {
+        assert_eq!(resolve_memory_limit(&Some(512.0), None), 512);
+    }
+
+    #[test]
+    fn resolve_memory_limit_uses_layout_limit_when_no_cli() {
+        assert_eq!(resolve_memory_limit(&None, Some(1024)), 1024);
+    }
+
+    #[test]
+    fn resolve_memory_limit_defaults_when_nothing_given() {
+        assert_eq!(resolve_memory_limit(&None, None), 100000);
+    }
+
+    #[test]
+    fn resolve_memory_limit_cli_takes_precedence_over_layout() {
+        assert_eq!(resolve_memory_limit(&Some(512.0), Some(1024)), 512);
+    }
 }

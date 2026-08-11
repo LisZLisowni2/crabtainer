@@ -142,8 +142,8 @@ mod tests {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
                 assert_eq!(memory_limit, Some(2048.0));
-                assert_eq!(command, "/bin/sh");
-                assert!(args.is_empty());
+                assert_eq!(command, Some("/bin/sh".to_string()));
+                assert_eq!(args, None);
             }
             _ => panic!("expected Run command"),
         }
@@ -157,12 +157,13 @@ mod tests {
                 cpu_limit,
                 memory_limit,
                 command,
-                ..
+                args,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
                 assert_eq!(memory_limit, None);
-                assert_eq!(command, "");
+                assert_eq!(command, None);
+                assert_eq!(args, None);
             }
             _ => panic!("expected Run command"),
         }
@@ -172,8 +173,8 @@ mod tests {
     fn run_collects_trailing_args() {
         match parse_run(&["my-layout", "-c", "/bin/sh", "echo", "hi"]) {
             Commands::Run { args, command, .. } => {
-                assert_eq!(command, "/bin/sh");
-                assert_eq!(args, vec!["echo", "hi"]);
+                assert_eq!(command, Some("/bin/sh".to_string()));
+                assert_eq!(args, Some(vec!["echo".to_string(), "hi".to_string()]));
             }
             _ => panic!("expected Run command"),
         }
@@ -207,7 +208,7 @@ mod tests {
             } => {
                 assert_eq!(cpu_limit, Some(0.5));
                 assert_eq!(memory_limit, Some(1024.0));
-                assert_eq!(command, "true");
+                assert_eq!(command, Some("true".to_string()));
             }
             _ => panic!("expected Run command"),
         }

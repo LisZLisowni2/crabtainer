@@ -183,7 +183,7 @@ CMD /bin/sh -c
                     image_ref: "ubuntu:latest".to_string(),
                     alias: "ubuntu".to_string(),
                 },
-                Instruction::From("ubuntu:latest".to_string()),
+                Instruction::From("ubuntu".to_string()),
                 Instruction::Copy {
                     src: "src".to_string(),
                     dst: "/app".to_string()
