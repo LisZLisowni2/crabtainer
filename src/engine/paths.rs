@@ -23,10 +23,15 @@ impl RustockerPaths {
     }
 
     pub fn init_system_dirs() -> Result<(), String> {
-        let dirs = [Self::image_store_dir(), Self::runtime_dir(), Self::layout_store_dir()];
+        let dirs = [
+            Self::image_store_dir(),
+            Self::runtime_dir(),
+            Self::layout_store_dir(),
+        ];
 
         for dir in &dirs {
-            fs::create_dir_all(dir).map_err(|e| format!("Error creating directory {:?}: {}", dir, e))?;
+            fs::create_dir_all(dir)
+                .map_err(|e| format!("Error creating directory {:?}: {}", dir, e))?;
         }
 
         Ok(())

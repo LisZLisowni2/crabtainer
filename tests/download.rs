@@ -60,6 +60,10 @@ async fn propagates_http_errors() {
         .await
         .unwrap_err();
 
-    assert!(err.contains("Error downloading image"), "unexpected error: {}", err);
+    assert!(
+        err.contains("Error downloading image"),
+        "unexpected error: {}",
+        err
+    );
     mock.assert();
 }

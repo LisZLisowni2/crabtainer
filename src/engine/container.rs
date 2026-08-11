@@ -1,13 +1,13 @@
-use nix::mount::{mount, umount2, MsFlags, MntFlags};
-use nix::sched::{clone, CloneFlags};
+use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
+use crate::engine::paths::RustockerPaths;
+use nix::mount::{MntFlags, MsFlags, mount, umount2};
+use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
 use nix::unistd::{chdir, execvp, sethostname};
+use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use rand::RngExt;
-use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
-use crate::engine::paths::RustockerPaths;
 
 #[derive(Debug)]
 pub struct ContainerOptions {
@@ -34,7 +34,7 @@ pub(crate) fn resolve_command(command: &str, layout_cmd: &String) -> String {
     }
 }
 
-pub(crate) fn resolve_args(args: &Vec<String>, layout_args: &Vec<String>) -> Vec<String> {
+pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
@@ -55,7 +55,12 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     }
     let layout_rootfs = layout_dir.join("rootfs");
 
-    let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(fs::read_to_string(layout_dir.join("config.json")).unwrap().as_str()).unwrap();
+    let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(
+        fs::read_to_string(layout_dir.join("config.json"))
+            .unwrap()
+            .as_str(),
+    )
+    .unwrap();
     let command = resolve_command(&opts.command, &layout_opts.cmd.unwrap());
     let args = resolve_args(&opts.args, &layout_opts.args);
     let cpu_limit = opts.cpu_limit.or(layout_opts.cpu_limit);
@@ -63,8 +68,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let container_id = generate_container_id();
 
-    let container_workdir = RustockerPaths::runtime_dir()
-        .join(&container_id);
+    let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
 
     let upper_dir = container_workdir.join("upper");
     let work_dir = container_workdir.join("work");
@@ -90,7 +94,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         MsFlags::empty(),
         Some(overlay_opts.as_str()),
     )
-        .expect("[ERROR] Failed to mount overlayfs");
+    .expect("[ERROR] Failed to mount overlayfs");
 
     println!("[HOST] Starting container {}", container_id);
 
@@ -99,7 +103,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         args,
         command,
         cpu_limit,
-        memory_limit
+        memory_limit,
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts).await?;
@@ -109,18 +113,16 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
 
-    let flags = CloneFlags::CLONE_NEWUTS
-        | CloneFlags::CLONE_NEWPID
-        | CloneFlags::CLONE_NEWNS;
+    let flags = CloneFlags::CLONE_NEWUTS | CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
 
     let child_pid = unsafe {
         clone(
             Box::new(|| child_process(&merged_rootfs, &container_id, &final_opts)),
             &mut stack[..],
             flags,
-            Some(Signal::SIGCHLD as i32)
+            Some(Signal::SIGCHLD as i32),
         )
-            .expect("[ERROR] Failed to spawn child.")
+        .expect("[ERROR] Failed to spawn child.")
     };
 
     if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid).await {
@@ -130,8 +132,8 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         nix::sys::wait::waitpid(child_pid, None).unwrap();
     })
-        .await
-        .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
+    .await
+    .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
 
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
@@ -152,7 +154,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 }
 
 fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOptions) -> isize {
-    sethostname(&container_id).ok();
+    sethostname(container_id).ok();
 
     if let Err(e) = mount(
         None::<&str>,
@@ -214,8 +216,8 @@ fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOption
         .map_err(|e| eprintln!("[CHILD WARN] Failed to umount .oldroot: {}", e))
         .ok();
 
-    let old_root_path= Path::new("/.oldroot");
-    if let Err(e) = fs::remove_dir_all(&old_root_path) {
+    let old_root_path = Path::new("/.oldroot");
+    if let Err(e) = fs::remove_dir_all(old_root_path) {
         eprintln!("[WARN] Failed to remove old root: {}", e);
     }
 
@@ -225,10 +227,7 @@ fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOption
         args_cstring.push(CString::new(arg.clone()).unwrap());
     }
 
-    if let Err(e) = execvp(&cmd_cstring, &args_cstring) {
-        eprintln!("[CHILD ERROR] Failed to exec {:?}: {}", options.command, e);
-        return 1;
-    }
+    execvp(&cmd_cstring, &args_cstring).ok();
 
     0
 }

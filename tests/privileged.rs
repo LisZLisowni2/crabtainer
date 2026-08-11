@@ -16,7 +16,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use rustocker::engine::container::{run_container, ContainerOptions};
+use rustocker::engine::container::{ContainerOptions, run_container};
 use rustocker::engine::instructions::from::from_image;
 use rustocker::engine::instructions::run::run_in_container;
 use rustocker::engine::paths::RustockerPaths;
@@ -78,7 +78,9 @@ async fn run_in_container_executes_command_in_namespace() {
     let _env = common::isolated_home();
     let home = _env.home();
 
-    let rootfs = RustockerPaths::layout_store_dir().join("layout-a").join("rootfs");
+    let rootfs = RustockerPaths::layout_store_dir()
+        .join("layout-a")
+        .join("rootfs");
     std::fs::create_dir_all(&rootfs).unwrap();
 
     let shell = match find_static_shell() {
@@ -90,7 +92,11 @@ async fn run_in_container_executes_command_in_namespace() {
     };
     install_rootfs_shell(&rootfs, &shell);
 
-    let result = run_in_container(&"layout-a".to_string(), "echo rustocker > /proof.txt".to_string()).await;
+    let result = run_in_container(
+        &"layout-a".to_string(),
+        "echo rustocker > /proof.txt".to_string(),
+    )
+    .await;
     assert!(result.is_ok(), "run_in_container failed: {:?}", result);
 
     let proof = rootfs.join("proof.txt");
@@ -111,7 +117,9 @@ async fn run_container_requires_root_and_overlayfs() {
     let home = _env.home();
 
     common::create_tarball(home, "base", &[("marker", "1")]);
-    from_image(&"base".to_string(), &"layout-a".to_string()).await.unwrap();
+    from_image(&"base".to_string(), &"layout-a".to_string())
+        .await
+        .unwrap();
 
     let layout_config = home.join("layouts").join("layout-a").join("config.json");
     let config = rustocker::engine::builder::LayoutOpts {
@@ -127,7 +135,7 @@ async fn run_container_requires_root_and_overlayfs() {
         command: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), "true".to_string()],
         cpu_limit: None,
-        memory_limit: None
+        memory_limit: None,
     };
     let result = std::thread::Builder::new()
         .stack_size(16 * 1024 * 1024)
@@ -142,7 +150,10 @@ async fn run_container_requires_root_and_overlayfs() {
 
     if let Err(e) = result {
         if e.contains("Error during mounting OverlayFS") || e.contains("Operation not permitted") {
-            eprintln!("SKIP: OverlayFS mount not permitted in this environment: {}", e);
+            eprintln!(
+                "SKIP: OverlayFS mount not permitted in this environment: {}",
+                e
+            );
         } else {
             panic!("unexpected error: {}", e);
         }
