@@ -3,7 +3,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Download { url: String, alias: String },
+    Download { image_ref: String },
     From(String),
     Copy { src: String, dst: String },
     Run(String),
@@ -75,8 +75,7 @@ impl Rustockerfile {
                     let parts: Vec<&str> = args.split_whitespace().collect();
                     if parts.len() == 3 && parts[1].to_uppercase() == "AS" {
                         instructions.push(Instruction::Download {
-                            url: parts[0].to_string(),
-                            alias: parts[2].to_string(),
+                            image_ref: parts[0].to_string(),
                         })
                     } else {
                         return Err(format!(
@@ -171,8 +170,8 @@ mod tests {
     #[test]
     fn parses_all_instruction_types() {
         let content = "\
-DOWNLOAD https://example.com/alpine.tar.gz AS alpine-base
-FROM alpine-base
+DOWNLOAD ubuntu:latest
+FROM ubuntu:latest
 COPY src /app
 RUN echo hello
 CMD /bin/sh -c
@@ -182,8 +181,7 @@ CMD /bin/sh -c
             parsed.instructions,
             vec![
                 Instruction::Download {
-                    url: "https://example.com/alpine.tar.gz".to_string(),
-                    alias: "alpine-base".to_string(),
+                    image_ref: "ubuntu:latest".to_string(),
                 },
                 Instruction::From("alpine-base".to_string()),
                 Instruction::Copy {
@@ -239,18 +237,6 @@ CMD /bin/sh -c
         let err = Rustockerfile::parse("FROM\n").unwrap_err();
         assert!(err.contains("Line 1"));
         assert!(err.contains("FROM"));
-    }
-
-    #[test]
-    fn download_requires_as_syntax() {
-        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz\n").unwrap_err();
-        assert!(err.contains("Line 1"));
-        assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
-
-        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz WRONG alias\n")
-            .unwrap_err();
-        assert!(err.contains("Line 1"));
-        assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
     }
 
     #[test]

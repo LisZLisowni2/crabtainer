@@ -101,9 +101,9 @@ pub async fn build_layout(
     for instruction in rustocker.instructions {
         count += 1;
         match instruction {
-            Instruction::Download { url, alias } => {
-                println!(" => [{}/{}] DOWNLOAD {} AS {}", count, steps, url, alias);
-                download_image_if_missing(&url, &alias).await?;
+            Instruction::Download { image_ref } => {
+                println!(" => [{}/{}] DOWNLOAD {}", count, steps, image_ref);
+                download_image_if_missing(&image_ref).await?;
             }
             Instruction::From(base_image) => {
                 println!(" => [{}/{}] FROM {}", count, steps, base_image);
