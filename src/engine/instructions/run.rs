@@ -3,7 +3,7 @@ use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
 use nix::unistd::{chdir, chroot, sethostname};
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 pub async fn run_in_container(output_layout_name: &String, command: String) -> Result<(), String> {

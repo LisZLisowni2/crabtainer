@@ -1,70 +1,69 @@
 use crate::engine::paths::RustockerPaths;
-use futures_util::StreamExt;
-use reqwest::Client;
+use futures_util::{StreamExt, TryFutureExt};
+use oci_client::client::{Client, ClientConfig};
+use oci_client::secrets::RegistryAuth;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
 pub async fn download_image_if_missing(
-    url: &str,
+    image_ref: &str,
     alias: &str,
 ) -> Result<std::path::PathBuf, String> {
     RustockerPaths::init_system_dirs()?;
 
-    let storage_dir = RustockerPaths::image_store_dir();
+    let reference: oci_client::Reference = image_ref
+        .parse()
+        .map_err(|e| format!(" => [DOWNLOAD] Invalid image reference: {}", e))?;
 
-    let target_path = storage_dir.join(format!("{}.tar.gz", alias));
+    let image_dir = RustockerPaths::image_store_dir().join(&alias);
 
-    if target_path.exists() {
-        println!(" => [DOWNLOAD] Image '{}' already exists", alias);
-        return Ok(target_path);
-    }
+    std::fs::create_dir_all(&image_dir)
+        .map_err(|e| format!("=> [DOWNLOAD] Failed to create image directory: {}", e))?;
 
-    println!(" => [DOWNLOAD] Downloading image from url {}...", url);
+    println!(" => [DOWNLOAD] Connecting to registry for {}...", image_ref);
 
-    let client = Client::new();
-    let response = client
-        .get(url)
-        .send()
+    let client = Client::new(ClientConfig::default());
+    let auth = RegistryAuth::Anonymous;
+
+    println!(" => [DOWNLOAD] Fetching manifest...");
+    let (manifest, _digest, config_json) = client
+        .pull_manifest_and_config(&reference, &auth)
         .await
-        .map_err(|e| format!("Error downloading image: {}", e))?;
+        .map_err(|e| format!("Failed to download manifest: {}", e))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Error downloading image: {}",
-            response.text().await.unwrap()
-        ));
-    }
+    std::fs::write(image_dir.join("config.json"), config_json)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
 
-    let total_size = response.content_length().unwrap_or(0);
+    println!(" => [DOWNLOAD] Pulling {} layers...", manifest.layers.len());
+    for (i, layer) in manifest.layers.iter().enumerate() {
+        let layer_filename = format!("layer_{}.tar.gz", i);
+        let layer_path = image_dir.join(&layer_filename);
 
-    let pb = indicatif::ProgressBar::new(total_size);
-    pb.set_style(
-        indicatif::ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .unwrap()
-            .progress_chars("#>-")
-    );
+        println!(
+            "    └─ Layer [{}/{}]: {}",
+            i + 1,
+            manifest.layers.len(),
+            &layer.digest[..12]
+        );
 
-    let mut file = File::create(&target_path)
-        .await
-        .map_err(|e| format!("Error creating file: {}", e))?;
-
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("Error reading chunk: {}", e))?;
-
-        file.write_all(&chunk)
+        let mut layer_file = File::create(layer_path)
             .await
-            .map_err(|e| format!("Error writing to file: {}", e))?;
+            .map_err(|e| format!("Failed to create layer file: {}", e))?;
 
-        pb.inc(chunk.len() as u64);
+        client
+            .pull_blob(&reference, &*layer.digest, &mut layer_file)
+            .await
+            .map_err(|e| format!("Failed to pull layer blob: {}", e))?;
+
+        layer_file
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush layer: {}", e))?;
     }
 
-    file.flush()
-        .await
-        .map_err(|e| format!("Error flushing file: {}", e))?;
-    println!(" => [DOWNLOAD] Image '{}' successfully downloaded", alias);
-
-    Ok(target_path)
+    println!(
+        " => [DOWNLOAD] Image '{}' successfully fetched and stored!",
+        alias
+    );
+    Ok(image_dir)
 }

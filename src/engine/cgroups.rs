@@ -1,4 +1,4 @@
-use crate::engine::container::ContainerOptions;
+use crate::engine::container::{ContainerOptions, ContainerReady};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -8,13 +8,13 @@ pub struct ResourcesLimits {
     pub memory_limit: Option<u64>,
 }
 
-pub async fn setup_cgroups(container_id: &str, opts: &ContainerOptions) -> Result<PathBuf, String> {
+pub async fn setup_cgroups(container_id: &str, opts: &ContainerReady) -> Result<PathBuf, String> {
     setup_cgroups_in(container_id, opts, Path::new("/sys/fs/cgroup")).await
 }
 
 async fn setup_cgroups_in(
     container_id: &str,
-    opts: &ContainerOptions,
+    opts: &ContainerReady,
     base_dir: &Path,
 ) -> Result<PathBuf, String> {
     let cgroup_dir = base_dir.join(container_id);
@@ -28,11 +28,9 @@ async fn setup_cgroups_in(
             .map_err(|e| format!("[CGROUP] Failed to write memory: {}", e))?;
     }
 
-    if let Some(quota) = opts.cpu_limit {
+    if let Some(quota) = opts.quota {
         let period = 100_000u64;
-        let quota_mem = quota as u64 * period;
-        let cpu_max_val = format!("{}, {}", quota_mem, period);
-        println!("[CGROUP] CPU max value: {}", cpu_max_val);
+        let cpu_max_val = format!("{}, {}", quota, period);
 
         std::fs::write(cgroup_dir.join("cpu.max"), cpu_max_val)
             .map_err(|e| format!("[CGROUP]  Failed to write cpu limit: {}", e))?;
@@ -70,12 +68,11 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn opts(cpu: Option<f64>, mem: Option<f64>) -> ContainerOptions {
-        ContainerOptions {
+    fn opts(cpu: Option<i64>, mem: Option<i64>) -> ContainerReady {
+        ContainerReady {
             layout_name: "test".to_string(),
-            command: "true".to_string(),
-            args: vec![],
-            cpu_limit: cpu,
+            args: vec!["true".to_string()],
+            quota: cpu,
             memory_limit: mem,
         }
     }
@@ -83,7 +80,7 @@ mod tests {
     #[tokio::test]
     async fn setup_writes_memory_and_cpu_limits() {
         let dir = tempdir().unwrap();
-        let result = setup_cgroups_in("cgroup-test", &opts(Some(1.5), Some(2048.0)), dir.path())
+        let result = setup_cgroups_in("cgroup-test", &opts(Some(150000), Some(2048)), dir.path())
             .await
             .unwrap();
         assert_eq!(result, dir.path().join("cgroup-test"));
@@ -93,7 +90,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(result.join("cpu.max")).unwrap(),
-            "1.5, 100000"
+            "150000, 100000"
         );
     }
 
@@ -111,17 +108,17 @@ mod tests {
     #[tokio::test]
     async fn setup_writes_only_provided_limits() {
         let dir = tempdir().unwrap();
-        let result = setup_cgroups_in("cpu-only", &opts(Some(2.0), None), dir.path())
+        let result = setup_cgroups_in("cpu-only", &opts(Some(200000), None), dir.path())
             .await
             .unwrap();
         assert!(!result.join("memory.max").exists());
         assert_eq!(
             std::fs::read_to_string(result.join("cpu.max")).unwrap(),
-            "2, 100000"
+            "200000, 100000"
         );
 
         let dir = tempdir().unwrap();
-        let result = setup_cgroups_in("mem-only", &opts(None, Some(512.0)), dir.path())
+        let result = setup_cgroups_in("mem-only", &opts(None, Some(512)), dir.path())
             .await
             .unwrap();
         assert_eq!(

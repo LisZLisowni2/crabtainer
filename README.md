@@ -34,7 +34,7 @@ sudo ./target/release/rustocker
 
 ## LICENSE
 
-The license for this project is based on dual license (APACHE 2.0 and MIT)
+The license for this project is based on APACHE 2.0 license. Look at [license](LICENSE) for futher information.
 
 ## Other
 

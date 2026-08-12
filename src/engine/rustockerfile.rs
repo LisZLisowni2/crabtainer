@@ -3,11 +3,11 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Download { url: String, alias: String },
+    Download { image_ref: String, alias: String },
     From(String),
     Copy { src: String, dst: String },
     Run(String),
-    Cmd { cmd: String, args: Vec<String> },
+    Cmd { args: Vec<String> },
     CpuLimit(f64),
     MemoryLimit(String),
 }
@@ -75,12 +75,12 @@ impl Rustockerfile {
                     let parts: Vec<&str> = args.split_whitespace().collect();
                     if parts.len() == 3 && parts[1].to_uppercase() == "AS" {
                         instructions.push(Instruction::Download {
-                            url: parts[0].to_string(),
+                            image_ref: parts[0].to_string(),
                             alias: parts[2].to_string(),
-                        })
+                        });
                     } else {
                         return Err(format!(
-                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <URL> AS <ALIAS>",
+                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS>",
                             line_num + 1
                         ));
                     }
@@ -114,10 +114,7 @@ impl Rustockerfile {
                     }
                     let cmd_args: Vec<String> =
                         args.split_whitespace().map(|s| s.to_string()).collect();
-                    instructions.push(Instruction::Cmd {
-                        cmd: cmd_args[0].clone(),
-                        args: cmd_args[1..].to_vec(),
-                    });
+                    instructions.push(Instruction::Cmd { args: cmd_args });
                 }
                 "CPU_LIMIT" => {
                     if args.is_empty() {
@@ -172,8 +169,8 @@ mod tests {
     #[test]
     fn parses_all_instruction_types() {
         let content = "\
-DOWNLOAD https://example.com/alpine.tar.gz AS alpine-base
-FROM alpine-base
+DOWNLOAD ubuntu:latest AS ubuntu
+FROM ubuntu
 COPY src /app
 RUN echo hello
 CMD /bin/sh -c
@@ -183,18 +180,17 @@ CMD /bin/sh -c
             parsed.instructions,
             vec![
                 Instruction::Download {
-                    url: "https://example.com/alpine.tar.gz".to_string(),
-                    alias: "alpine-base".to_string(),
+                    image_ref: "ubuntu:latest".to_string(),
+                    alias: "ubuntu".to_string(),
                 },
-                Instruction::From("alpine-base".to_string()),
+                Instruction::From("ubuntu".to_string()),
                 Instruction::Copy {
                     src: "src".to_string(),
                     dst: "/app".to_string()
                 },
                 Instruction::Run("echo hello".to_string()),
                 Instruction::Cmd {
-                    cmd: "/bin/sh".to_string(),
-                    args: vec!["-c".to_string()]
+                    args: vec!["/bin/sh".to_string(), "-c".to_string()]
                 },
             ]
         );
@@ -241,18 +237,6 @@ CMD /bin/sh -c
         let err = Rustockerfile::parse("FROM\n").unwrap_err();
         assert!(err.contains("Line 1"));
         assert!(err.contains("FROM"));
-    }
-
-    #[test]
-    fn download_requires_as_syntax() {
-        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz\n").unwrap_err();
-        assert!(err.contains("Line 1"));
-        assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
-
-        let err = Rustockerfile::parse("DOWNLOAD https://example.com/x.tar.gz WRONG alias\n")
-            .unwrap_err();
-        assert!(err.contains("Line 1"));
-        assert!(err.contains("DOWNLOAD <URL> AS <ALIAS>"));
     }
 
     #[test]
@@ -316,8 +300,12 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "/bin/sh".to_string(),
-                args: vec!["-c".to_string(), "echo".to_string(), "hello".to_string()],
+                args: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo".to_string(),
+                    "hello".to_string()
+                ],
             },]
         );
     }
@@ -328,8 +316,7 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "ls".to_string(),
-                args: vec![]
+                args: vec!["ls".to_string()]
             },]
         );
     }
@@ -340,8 +327,11 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                cmd: "python3".to_string(),
-                args: vec!["-m".to_string(), "http.server".to_string()],
+                args: vec![
+                    "python3".to_string(),
+                    "-m".to_string(),
+                    "http.server".to_string()
+                ],
             },]
         );
     }

@@ -1,9 +1,11 @@
 use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::paths::RustockerPaths;
+use clap::arg;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
 use nix::unistd::{chdir, execvp, sethostname};
+use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
@@ -12,10 +14,17 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct ContainerOptions {
     pub layout_name: String,
-    pub command: String,
     pub args: Vec<String>,
     pub cpu_limit: Option<f64>,
     pub memory_limit: Option<f64>,
+}
+
+#[derive(Debug)]
+pub struct ContainerReady {
+    pub layout_name: String,
+    pub args: Vec<String>,
+    pub quota: Option<i64>,
+    pub memory_limit: Option<i64>,
 }
 
 pub(crate) fn generate_container_id() -> String {
@@ -26,19 +35,38 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub(crate) fn resolve_command(command: &str, layout_cmd: &String) -> String {
-    if command.is_empty() {
-        layout_cmd.to_string()
-    } else {
-        command.to_string()
-    }
-}
-
-pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
+pub(crate) fn resolve_args(args: &[String], layout_args: &Vec<String>) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
         args.to_vec()
+    }
+}
+
+pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
+    if let Some(cpu) = cpu_limit {
+        (*cpu as i64) * 100000i64
+    } else {
+        if let Some(cpu) = layout_cpu_limit {
+            cpu
+        } else {
+            100000
+        }
+    }
+}
+
+pub(crate) fn resolve_memory_limit(
+    memory_limit: &Option<f64>,
+    layout_memory_limit: Option<i64>,
+) -> i64 {
+    if let Some(memory) = memory_limit {
+        *memory as i64
+    } else {
+        if let Some(memory) = layout_memory_limit {
+            memory
+        } else {
+            100000
+        }
     }
 }
 
@@ -55,16 +83,32 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     }
     let layout_rootfs = layout_dir.join("rootfs");
 
-    let layout_opts: crate::engine::builder::LayoutOpts = serde_json::from_str(
-        fs::read_to_string(layout_dir.join("config.json"))
-            .unwrap()
-            .as_str(),
-    )
-    .unwrap();
-    let command = resolve_command(&opts.command, &layout_opts.cmd.unwrap());
-    let args = resolve_args(&opts.args, &layout_opts.args);
-    let cpu_limit = opts.cpu_limit.or(layout_opts.cpu_limit);
-    let memory_limit = opts.memory_limit.or(layout_opts.memory_limit);
+    let layout_opts: oci_spec::runtime::Spec = Spec::load(layout_dir.join("config.json")).unwrap();
+
+    let default_args = layout_opts
+        .process()
+        .as_ref()
+        .and_then(|p| p.args().as_ref());
+
+    let default_cpu = layout_opts
+        .linux()
+        .as_ref()
+        .and_then(|l| l.resources().as_ref())
+        .and_then(|r| r.cpu().as_ref())
+        .and_then(|c| c.quota());
+
+    let default_memory = layout_opts
+        .linux()
+        .as_ref()
+        .and_then(|l| l.resources().as_ref())
+        .and_then(|r| r.memory().as_ref())
+        .and_then(|m| m.limit());
+
+    let args = resolve_args(&opts.args, default_args.unwrap());
+
+    let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
+
+    let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
     let container_id = generate_container_id();
 
@@ -98,12 +142,11 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     println!("[HOST] Starting container {}", container_id);
 
-    let final_opts = ContainerOptions {
+    let final_opts = ContainerReady {
         layout_name: opts.layout_name,
         args,
-        command,
-        cpu_limit,
-        memory_limit,
+        quota: Some(cpu_limit),
+        memory_limit: Some(memory_limit),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts).await?;
@@ -153,7 +196,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOptions) -> isize {
+fn child_process(rootfs: &Path, container_id: &String, options: &ContainerReady) -> isize {
     sethostname(container_id).ok();
 
     if let Err(e) = mount(
@@ -221,9 +264,9 @@ fn child_process(rootfs: &Path, container_id: &String, options: &ContainerOption
         eprintln!("[WARN] Failed to remove old root: {}", e);
     }
 
-    let cmd_cstring = CString::new(options.command.clone()).unwrap();
+    let cmd_cstring = CString::new(options.args[0].clone()).unwrap();
     let mut args_cstring = vec![cmd_cstring.clone()];
-    for arg in &options.args {
+    for arg in &options.args[1..] {
         args_cstring.push(CString::new(arg.clone()).unwrap());
     }
 
@@ -246,23 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_command_uses_layout_cmd_when_command_empty() {
-        let cmd = "ls".to_string();
-        assert_eq!(resolve_command("", &cmd), "ls");
-    }
-
-    #[test]
-    fn resolve_command_prefers_provided_command() {
-        let cmd = "find".to_string();
-        assert_eq!(resolve_command("ls", &cmd), "ls");
-    }
-
-    #[test]
-    fn resolve_command_empty_cmd_yields_empty_string() {
-        assert_eq!(resolve_command("", &"".to_string()), "");
-    }
-
-    #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&vec![], &layout_args), vec!["-lh"]);
@@ -277,5 +303,45 @@ mod tests {
     fn resolve_args_prefers_provided_args() {
         let args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&vec!["aux".to_string()], &args), vec!["aux"]);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_uses_cli_quota_when_given() {
+        assert_eq!(resolve_cpu_limit(&Some(2.0), None), 200000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_uses_layout_quota_when_no_cli() {
+        assert_eq!(resolve_cpu_limit(&None, Some(50000)), 50000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_defaults_when_nothing_given() {
+        assert_eq!(resolve_cpu_limit(&None, None), 100000);
+    }
+
+    #[test]
+    fn resolve_cpu_limit_cli_takes_precedence_over_layout() {
+        assert_eq!(resolve_cpu_limit(&Some(2.0), Some(50000)), 200000);
+    }
+
+    #[test]
+    fn resolve_memory_limit_uses_cli_limit_when_given() {
+        assert_eq!(resolve_memory_limit(&Some(512.0), None), 512);
+    }
+
+    #[test]
+    fn resolve_memory_limit_uses_layout_limit_when_no_cli() {
+        assert_eq!(resolve_memory_limit(&None, Some(1024)), 1024);
+    }
+
+    #[test]
+    fn resolve_memory_limit_defaults_when_nothing_given() {
+        assert_eq!(resolve_memory_limit(&None, None), 100000);
+    }
+
+    #[test]
+    fn resolve_memory_limit_cli_takes_precedence_over_layout() {
+        assert_eq!(resolve_memory_limit(&Some(512.0), Some(1024)), 512);
     }
 }

@@ -1,6 +1,6 @@
-DOWNLOAD https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.1-x86_64.tar.gz AS alpine-base
+DOWNLOAD ubuntu:latest AS ubuntu
 
-FROM alpine-base
+FROM ubuntu
 
 RUN mkdir test
 
@@ -13,4 +13,4 @@ COPY * /test/entire_base/
 CPU_LIMIT 1.5
 MEMORY_LIMIT 2g
 
-CMD /bin/sh -c echo hello
+CMD echo hello

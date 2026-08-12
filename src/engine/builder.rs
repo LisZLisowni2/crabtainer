@@ -4,15 +4,84 @@ use crate::engine::instructions::from::from_image;
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 use crate::engine::rustockerfile::{Instruction, Rustockerfile, parse_memory_limit};
+use oci_spec::runtime::{
+    LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
+    LinuxResourcesBuilder, ProcessBuilder, RootBuilder, SpecBuilder,
+};
 use serde::{Deserialize, Serialize};
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LayoutOpts {
     pub memory_limit: Option<f64>,
     pub cpu_limit: Option<f64>,
-    pub cmd: Option<String>,
     pub args: Vec<String>,
+}
+
+async fn save_config(
+    opts: LayoutOpts,
+    layout_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let period = 100000.0;
+    let quota = if let Some(cpu) = opts.cpu_limit {
+        cpu * period
+    } else {
+        period
+    };
+
+    let memory = if let Some(mem) = opts.memory_limit {
+        mem
+    } else {
+        f64::MAX
+    };
+
+    let spec = SpecBuilder::default()
+        .root(
+            RootBuilder::default()
+                .path("rootfs")
+                .readonly(false)
+                .build()?,
+        )
+        .process(
+            ProcessBuilder::default()
+                .terminal(true)
+                .args(opts.args)
+                .build()?,
+        )
+        .linux(
+            LinuxBuilder::default()
+                .namespaces(vec![
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Pid)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Mount)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Uts)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Ipc)
+                        .build()?,
+                ])
+                .resources(
+                    LinuxResourcesBuilder::default()
+                        .cpu(
+                            LinuxCpuBuilder::default()
+                                .quota(quota as i64)
+                                .period(period as u64)
+                                .build()?,
+                        )
+                        .memory(LinuxMemoryBuilder::default().limit(memory as i64).build()?)
+                        .build()?,
+                )
+                .build()?,
+        )
+        .build()?;
+
+    spec.save(layout_path.join("config.json"))?;
+
+    Ok(())
 }
 
 pub async fn build_layout(
@@ -38,16 +107,18 @@ pub async fn build_layout(
     let mut opts = LayoutOpts {
         memory_limit: None,
         cpu_limit: None,
-        cmd: None,
         args: vec![],
     };
 
     for instruction in rustocker.instructions {
         count += 1;
         match instruction {
-            Instruction::Download { url, alias } => {
-                println!(" => [{}/{}] DOWNLOAD {} AS {}", count, steps, url, alias);
-                download_image_if_missing(&url, &alias).await?;
+            Instruction::Download { image_ref, alias } => {
+                println!(
+                    " => [{}/{}] DOWNLOAD {} AS {}",
+                    count, steps, image_ref, alias
+                );
+                download_image_if_missing(&image_ref, &alias).await?;
             }
             Instruction::From(base_image) => {
                 println!(" => [{}/{}] FROM {}", count, steps, base_image);
@@ -61,9 +132,8 @@ pub async fn build_layout(
                 println!(" => [{}/{}] RUN {}", count, steps, command);
                 run_in_container(&output_layout_name, command).await?;
             }
-            Instruction::Cmd { cmd, args } => {
-                println!(" => [{}/{}] CMD {:?} {:?}", count, steps, cmd, args);
-                opts.cmd = Some(cmd);
+            Instruction::Cmd { args } => {
+                println!(" => [{}/{}] CMD {:?}", count, steps, args);
                 opts.args = args.clone();
             }
             Instruction::CpuLimit(cores) => {
@@ -78,10 +148,10 @@ pub async fn build_layout(
         }
     }
 
-    println!("[BUILDER] Instruction done. Injecting config.");
-
-    let json_string = serde_json::to_string_pretty(&opts).unwrap();
-    std::fs::write(output_path.join("config.json"), json_string).unwrap();
+    println!("[BUILDER] Instruction done. Saving config.");
+    if let Err(e) = save_config(opts, output_path).await {
+        eprintln!("[BUILDER] Failed to save config: {}", e);
+    }
 
     Ok(())
 }
@@ -94,8 +164,11 @@ mod tests {
         LayoutOpts {
             memory_limit: Some(2048.0),
             cpu_limit: Some(1.5),
-            cmd: Some("/bin/sh".to_string()),
-            args: vec!["-c".to_string(), "echo hi".to_string()],
+            args: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string(),
+            ],
         }
     }
 
@@ -107,7 +180,13 @@ mod tests {
 
         assert_eq!(decoded.memory_limit, Some(2048.0));
         assert_eq!(decoded.cpu_limit, Some(1.5));
-        assert_eq!(decoded.cmd, Some("/bin/sh".to_string()));
-        assert_eq!(decoded.args, vec!["-c".to_string(), "echo hi".to_string()]);
+        assert_eq!(
+            decoded.args,
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string()
+            ]
+        );
     }
 }

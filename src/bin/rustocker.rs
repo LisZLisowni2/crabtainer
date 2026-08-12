@@ -21,15 +21,15 @@ enum Commands {
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
-        #[arg(short, long, default_value = "")]
-        command: String,
+        #[arg(short, long)]
+        command: Option<String>,
 
         #[arg(
             trailing_var_arg = true,
             allow_hyphen_values = true,
             requires = "command"
         )]
-        args: Vec<String>,
+        args: Option<Vec<String>>,
     },
     Build {
         #[arg(short, long, default_value = "Rustockerfile")]
@@ -58,10 +58,19 @@ async fn main() {
             cpu_limit,
             memory_limit,
         } => {
+            let mut final_command: Vec<String> = vec![];
+
+            if let Some(cmd) = command {
+                final_command.push(cmd);
+            }
+
+            if let Some(arguments) = args {
+                final_command.extend(arguments);
+            }
+
             let options = ContainerOptions {
                 layout_name: layout,
-                command,
-                args,
+                args: final_command,
                 cpu_limit,
                 memory_limit,
             };
@@ -133,8 +142,8 @@ mod tests {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
                 assert_eq!(memory_limit, Some(2048.0));
-                assert_eq!(command, "/bin/sh");
-                assert!(args.is_empty());
+                assert_eq!(command, Some("/bin/sh".to_string()));
+                assert_eq!(args, None);
             }
             _ => panic!("expected Run command"),
         }
@@ -148,12 +157,13 @@ mod tests {
                 cpu_limit,
                 memory_limit,
                 command,
-                ..
+                args,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
                 assert_eq!(memory_limit, None);
-                assert_eq!(command, "");
+                assert_eq!(command, None);
+                assert_eq!(args, None);
             }
             _ => panic!("expected Run command"),
         }
@@ -163,8 +173,8 @@ mod tests {
     fn run_collects_trailing_args() {
         match parse_run(&["my-layout", "-c", "/bin/sh", "echo", "hi"]) {
             Commands::Run { args, command, .. } => {
-                assert_eq!(command, "/bin/sh");
-                assert_eq!(args, vec!["echo", "hi"]);
+                assert_eq!(command, Some("/bin/sh".to_string()));
+                assert_eq!(args, Some(vec!["echo".to_string(), "hi".to_string()]));
             }
             _ => panic!("expected Run command"),
         }
@@ -198,7 +208,7 @@ mod tests {
             } => {
                 assert_eq!(cpu_limit, Some(0.5));
                 assert_eq!(memory_limit, Some(1024.0));
-                assert_eq!(command, "true");
+                assert_eq!(command, Some("true".to_string()));
             }
             _ => panic!("expected Run command"),
         }
