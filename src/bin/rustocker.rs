@@ -56,7 +56,7 @@ async fn main() {
             command,
             args,
             cpu_limit,
-            memory_limit
+            memory_limit,
         } => {
             let mut final_command: Vec<String> = vec![];
 

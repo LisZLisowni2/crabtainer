@@ -1,15 +1,15 @@
 use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::paths::RustockerPaths;
+use clap::arg;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
 use nix::unistd::{chdir, execvp, sethostname};
+use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use clap::arg;
-use oci_spec::runtime::Spec;
 
 #[derive(Debug)]
 pub struct ContainerOptions {
@@ -55,7 +55,10 @@ pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Optio
     }
 }
 
-pub(crate) fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
+pub(crate) fn resolve_memory_limit(
+    memory_limit: &Option<f64>,
+    layout_memory_limit: Option<i64>,
+) -> i64 {
     if let Some(memory) = memory_limit {
         *memory as i64
     } else {
@@ -95,23 +98,17 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         .and_then(|c| c.quota());
 
     let default_memory = layout_opts
-        .linux().as_ref()
+        .linux()
+        .as_ref()
         .and_then(|l| l.resources().as_ref())
         .and_then(|r| r.memory().as_ref())
         .and_then(|m| m.limit());
 
-
     let args = resolve_args(&opts.args, default_args.unwrap());
 
-    let cpu_limit = resolve_cpu_limit(
-        &opts.cpu_limit,
-        default_cpu
-    );
+    let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
 
-    let memory_limit = resolve_memory_limit(
-        &opts.memory_limit,
-        default_memory,
-    );
+    let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
     let container_id = generate_container_id();
 

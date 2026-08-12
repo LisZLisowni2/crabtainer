@@ -31,7 +31,7 @@ async fn setup_cgroups_in(
     if let Some(quota) = opts.quota {
         let period = 100_000u64;
         let cpu_max_val = format!("{}, {}", quota, period);
-        
+
         std::fs::write(cgroup_dir.join("cpu.max"), cpu_max_val)
             .map_err(|e| format!("[CGROUP]  Failed to write cpu limit: {}", e))?;
     }

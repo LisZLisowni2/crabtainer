@@ -4,9 +4,12 @@ use crate::engine::instructions::from::from_image;
 use crate::engine::instructions::run::run_in_container;
 use crate::engine::paths::RustockerPaths;
 use crate::engine::rustockerfile::{Instruction, Rustockerfile, parse_memory_limit};
+use oci_spec::runtime::{
+    LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
+    LinuxResourcesBuilder, ProcessBuilder, RootBuilder, SpecBuilder,
+};
 use serde::{Deserialize, Serialize};
-use std::path::{PathBuf, Path};
-use oci_spec::runtime::{LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType, LinuxResourcesBuilder, ProcessBuilder, RootBuilder, SpecBuilder};
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LayoutOpts {
@@ -15,7 +18,10 @@ pub struct LayoutOpts {
     pub args: Vec<String>,
 }
 
-async fn save_config(opts: LayoutOpts, layout_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+async fn save_config(
+    opts: LayoutOpts,
+    layout_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     let period = 100000.0;
     let quota = if let Some(cpu) = opts.cpu_limit {
         cpu * period
@@ -34,36 +40,42 @@ async fn save_config(opts: LayoutOpts, layout_path: PathBuf) -> Result<(), Box<d
             RootBuilder::default()
                 .path("rootfs")
                 .readonly(false)
-                .build()?
+                .build()?,
         )
         .process(
             ProcessBuilder::default()
                 .terminal(true)
                 .args(opts.args)
-                .build()?
+                .build()?,
         )
         .linux(
             LinuxBuilder::default()
                 .namespaces(vec![
-                    LinuxNamespaceBuilder::default().typ(LinuxNamespaceType::Pid).build()?,
-                    LinuxNamespaceBuilder::default().typ(LinuxNamespaceType::Mount).build()?,
-                    LinuxNamespaceBuilder::default().typ(LinuxNamespaceType::Uts).build()?,
-                    LinuxNamespaceBuilder::default().typ(LinuxNamespaceType::Ipc).build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Pid)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Mount)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Uts)
+                        .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Ipc)
+                        .build()?,
                 ])
                 .resources(
                     LinuxResourcesBuilder::default()
-                            .cpu(LinuxCpuBuilder::default()
+                        .cpu(
+                            LinuxCpuBuilder::default()
                                 .quota(quota as i64)
                                 .period(period as u64)
-                                .build()?
-                            )
-                            .memory(LinuxMemoryBuilder::default()
-                                .limit(memory as i64)
-                                .build()?
-                            )
+                                .build()?,
+                        )
+                        .memory(LinuxMemoryBuilder::default().limit(memory as i64).build()?)
                         .build()?,
                 )
-                .build()?
+                .build()?,
         )
         .build()?;
 
@@ -102,7 +114,10 @@ pub async fn build_layout(
         count += 1;
         match instruction {
             Instruction::Download { image_ref, alias } => {
-                println!(" => [{}/{}] DOWNLOAD {} AS {}", count, steps, image_ref, alias);
+                println!(
+                    " => [{}/{}] DOWNLOAD {} AS {}",
+                    count, steps, image_ref, alias
+                );
                 download_image_if_missing(&image_ref, &alias).await?;
             }
             Instruction::From(base_image) => {
@@ -149,7 +164,11 @@ mod tests {
         LayoutOpts {
             memory_limit: Some(2048.0),
             cpu_limit: Some(1.5),
-            args: vec!["/bin/sh".to_string(), "-c".to_string(), "echo hi".to_string()],
+            args: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string(),
+            ],
         }
     }
 
@@ -161,6 +180,13 @@ mod tests {
 
         assert_eq!(decoded.memory_limit, Some(2048.0));
         assert_eq!(decoded.cpu_limit, Some(1.5));
-        assert_eq!(decoded.args, vec!["/bin/sh".to_string(), "-c".to_string(), "echo hi".to_string()]);
+        assert_eq!(
+            decoded.args,
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string()
+            ]
+        );
     }
 }

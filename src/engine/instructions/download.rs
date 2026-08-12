@@ -39,7 +39,12 @@ pub async fn download_image_if_missing(
         let layer_filename = format!("layer_{}.tar.gz", i);
         let layer_path = image_dir.join(&layer_filename);
 
-        println!("    └─ Layer [{}/{}]: {}", i + 1, manifest.layers.len(), &layer.digest[..12]);
+        println!(
+            "    └─ Layer [{}/{}]: {}",
+            i + 1,
+            manifest.layers.len(),
+            &layer.digest[..12]
+        );
 
         let mut layer_file = File::create(layer_path)
             .await
@@ -50,11 +55,15 @@ pub async fn download_image_if_missing(
             .await
             .map_err(|e| format!("Failed to pull layer blob: {}", e))?;
 
-        layer_file.flush()
+        layer_file
+            .flush()
             .await
             .map_err(|e| format!("Failed to flush layer: {}", e))?;
     }
 
-    println!(" => [DOWNLOAD] Image '{}' successfully fetched and stored!", alias);
+    println!(
+        " => [DOWNLOAD] Image '{}' successfully fetched and stored!",
+        alias
+    );
     Ok(image_dir)
 }

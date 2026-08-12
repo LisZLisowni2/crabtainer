@@ -74,14 +74,16 @@ impl Rustockerfile {
 
                     let parts: Vec<&str> = args.split_whitespace().collect();
                     if parts.len() == 3 && parts[1].to_uppercase() == "AS" {
-                        instructions.push(Instruction::Download { 
+                        instructions.push(Instruction::Download {
                             image_ref: parts[0].to_string(),
                             alias: parts[2].to_string(),
                         });
-                    } else { 
-                        return Err(format!("Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS>", line_num + 1));
+                    } else {
+                        return Err(format!(
+                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS>",
+                            line_num + 1
+                        ));
                     }
-
                 }
                 "FROM" => {
                     if args.is_empty() {
@@ -112,9 +114,7 @@ impl Rustockerfile {
                     }
                     let cmd_args: Vec<String> =
                         args.split_whitespace().map(|s| s.to_string()).collect();
-                    instructions.push(Instruction::Cmd {
-                        args: cmd_args
-                    });
+                    instructions.push(Instruction::Cmd { args: cmd_args });
                 }
                 "CPU_LIMIT" => {
                     if args.is_empty() {
@@ -300,7 +300,12 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                args: vec!["/bin/sh".to_string(), "-c".to_string(), "echo".to_string(), "hello".to_string()],
+                args: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo".to_string(),
+                    "hello".to_string()
+                ],
             },]
         );
     }
@@ -322,7 +327,11 @@ CMD /bin/sh -c
         assert_eq!(
             parsed.instructions,
             vec![Instruction::Cmd {
-                args: vec!["python3".to_string(), "-m".to_string(), "http.server".to_string()],
+                args: vec![
+                    "python3".to_string(),
+                    "-m".to_string(),
+                    "http.server".to_string()
+                ],
             },]
         );
     }

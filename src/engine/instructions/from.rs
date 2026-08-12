@@ -7,7 +7,10 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     let image_path = RustockerPaths::image_store_dir().join(&image_dir_name);
 
     if !image_path.exists() || !image_path.is_dir() {
-        return Err(format!(" => [FROM] Image '{}' not found in local store. Did you run DOWNLOAD?", base_image));
+        return Err(format!(
+            " => [FROM] Image '{}' not found in local store. Did you run DOWNLOAD?",
+            base_image
+        ));
     }
 
     println!(
@@ -46,14 +49,26 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     });
 
     if layer_files.is_empty() {
-        return Err(format!(" => [FROM] No layers archive found in image store for {}", base_image));
+        return Err(format!(
+            " => [FROM] No layers archive found in image store for {}",
+            base_image
+        ));
     }
 
     for (idx, layer_path) in layer_files.iter().enumerate() {
-        println!("    └─ Unpacking layer [{}/{}]: {:?}", idx + 1, layer_files.len(), layer_path.file_name().unwrap_or_default());
+        println!(
+            "    └─ Unpacking layer [{}/{}]: {:?}",
+            idx + 1,
+            layer_files.len(),
+            layer_path.file_name().unwrap_or_default()
+        );
 
-        let tar_gz = std::fs::File::open(&layer_path)
-            .map_err(|e| format!("=> [FROM] Failed to open layer file '{:?}': {}", layer_path, e))?;
+        let tar_gz = std::fs::File::open(&layer_path).map_err(|e| {
+            format!(
+                "=> [FROM] Failed to open layer file '{:?}': {}",
+                layer_path, e
+            )
+        })?;
 
         let tar_decoder = flate2::read::GzDecoder::new(tar_gz);
         let mut archive = tar::Archive::new(tar_decoder);
@@ -61,11 +76,19 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
         archive.set_preserve_permissions(true);
         archive.set_unpack_xattrs(true);
 
-        for entry_result in archive.entries().map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))? {
-            let mut entry = entry_result.map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))?;
+        for entry_result in archive
+            .entries()
+            .map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))?
+        {
+            let mut entry =
+                entry_result.map_err(|e| format!("=> [FROM] Failed to read layer: {}", e))?;
 
             if let Err(e) = entry.unpack_in(&target_rootfs) {
-                eprintln!("       [WARN] Non-fatal unpack issue on {:?}: {}", entry.path().unwrap_or_default(), e);
+                eprintln!(
+                    "       [WARN] Non-fatal unpack issue on {:?}: {}",
+                    entry.path().unwrap_or_default(),
+                    e
+                );
             }
         }
 
@@ -79,7 +102,10 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
                 .map_err(|e| format!("=> [FROM] Failed to copy layer config file: {}", e))?;
         }
 
-        println!(" => [FROM] Successfully constructed rootfs for '{}'", output_layout_name);
+        println!(
+            " => [FROM] Successfully constructed rootfs for '{}'",
+            output_layout_name
+        );
     }
 
     Ok(())

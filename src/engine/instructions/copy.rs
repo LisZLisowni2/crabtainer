@@ -76,16 +76,19 @@ impl RustockerIgnore {
 
         let walker = WalkDir::new(source_dir).into_iter();
 
-        for entry in walker.filter_entry(|e| {
-            if e.path() == source_dir {
-                return true;
-            }
-            if let Ok(rel) = e.path().strip_prefix(&self.root) {
-                !self.is_ignored(rel)
-            } else {
-                true
-            }
-        }).flatten() {
+        for entry in walker
+            .filter_entry(|e| {
+                if e.path() == source_dir {
+                    return true;
+                }
+                if let Ok(rel) = e.path().strip_prefix(&self.root) {
+                    !self.is_ignored(rel)
+                } else {
+                    true
+                }
+            })
+            .flatten()
+        {
             if entry.file_type().is_file() {
                 let rel = entry
                     .path()
@@ -108,12 +111,8 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
         .join(dst_relative);
 
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                " => [COPY] Failed to create directories: {}",
-                err
-            )
-        })?;
+        fs::create_dir_all(parent)
+            .map_err(|err| format!(" => [COPY] Failed to create directories: {}", err))?;
     }
 
     let mut ignore: Vec<String> = Vec::new();
