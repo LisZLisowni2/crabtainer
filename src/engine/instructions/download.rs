@@ -39,7 +39,7 @@ pub async fn download_image_if_missing(
         let layer_filename = format!("layer_{}.tar.gz", i);
         let layer_path = image_dir.join(&layer_filename);
 
-        println!("    └─ Layer [{}/{}]: {}", i + 1, manifest.layers.len(), &layer.digest[..12]);;
+        println!("    └─ Layer [{}/{}]: {}", i + 1, manifest.layers.len(), &layer.digest[..12]);
 
         let mut layer_file = File::create(layer_path)
             .await
