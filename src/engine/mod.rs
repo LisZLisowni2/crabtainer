@@ -4,3 +4,4 @@ pub mod container;
 pub mod instructions;
 pub mod paths;
 pub mod rustockerfile;
+pub mod network;
