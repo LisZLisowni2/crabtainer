@@ -1,6 +1,5 @@
 use crate::engine::paths::RustockerPaths;
 use std::path::PathBuf;
-use tokio::process::Command;
 
 pub async fn from_image(base_image: &String, output_layout_name: &String) -> Result<(), String> {
     let image_dir_name = base_image.replace("/", "_").replace(".", "_");
@@ -101,11 +100,6 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
             std::fs::copy(&src_config, &dest_config)
                 .map_err(|e| format!("=> [FROM] Failed to copy layer config file: {}", e))?;
         }
-
-        println!(
-            " => [FROM] Successfully constructed rootfs for '{}'",
-            output_layout_name
-        );
     }
 
     Ok(())

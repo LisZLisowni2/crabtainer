@@ -1,16 +1,16 @@
-DOWNLOAD ubuntu:latest AS ubuntu
+DOWNLOAD gentoo/stage3 AS gentoo
 
-FROM ubuntu
+FROM gentoo
 
-RUN mkdir test
+# RUN mkdir test
 
-COPY Rustockerfile /
-COPY Rustockerfile /test/
-COPY src/lib.rs /test/
-COPY src /test/src/
-COPY * /test/entire_base/
+# COPY Rustockerfile /
+# COPY Rustockerfile /test/
+# COPY src/lib.rs /test/
+# COPY src /test/src/
+# COPY * /test/entire_base/
 
 CPU_LIMIT 1.5
 MEMORY_LIMIT 2g
 
-CMD echo hello
+CMD /bin/bash

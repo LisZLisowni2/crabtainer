@@ -1,5 +1,4 @@
 use crate::engine::paths::RustockerPaths;
-use futures_util::{StreamExt, TryFutureExt};
 use oci_client::client::{Client, ClientConfig};
 use oci_client::secrets::RegistryAuth;
 use tokio::fs::File;

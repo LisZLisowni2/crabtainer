@@ -1,4 +1,4 @@
-use crate::engine::container::{ContainerOptions, ContainerReady};
+use crate::engine::container::{ContainerReady};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
