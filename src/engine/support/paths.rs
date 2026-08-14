@@ -41,7 +41,7 @@ impl RustockerPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::test_utils::{with_home, without_home};
+    use crate::engine::support::test_utils::{with_home, without_home};
 
     #[test]
     fn base_dir_defaults_to_var_rustocker() {

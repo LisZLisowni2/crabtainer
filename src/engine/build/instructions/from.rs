@@ -1,4 +1,4 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use std::path::PathBuf;
 
 pub async fn from_image(base_image: &String, output_layout_name: &String) -> Result<(), String> {
@@ -108,7 +108,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::test_utils::with_home;
+    use crate::engine::support::test_utils::with_home;
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use tar::Builder;

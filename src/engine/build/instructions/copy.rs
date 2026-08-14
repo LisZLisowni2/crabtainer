@@ -1,4 +1,4 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::fs;
 use std::path::{Path, PathBuf};

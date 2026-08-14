@@ -1,6 +1,7 @@
-use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
-use crate::engine::paths::RustockerPaths;
-use crate::engine::network::{Ipam, NetworkManager};
+use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
+use crate::engine::runtime::network::{Ipam, NetworkManager};
+use crate::engine::runtime::options::{ContainerOptions, ContainerReady};
+use crate::engine::support::paths::RustockerPaths;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
@@ -11,22 +12,6 @@ use std::ffi::CString;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::Path;
-
-#[derive(Debug)]
-pub struct ContainerOptions {
-    pub layout_name: String,
-    pub args: Vec<String>,
-    pub cpu_limit: Option<f64>,
-    pub memory_limit: Option<f64>,
-}
-
-#[derive(Debug)]
-pub struct ContainerReady {
-    pub layout_name: String,
-    pub args: Vec<String>,
-    pub quota: Option<i64>,
-    pub memory_limit: Option<i64>,
-}
 
 pub(crate) fn generate_container_id() -> String {
     let mut rng = rand::rng();

@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
-use rustocker::engine::builder::build_layout;
-use rustocker::engine::container::{ContainerOptions, run_container};
+use rustocker::engine::build::builder::build_layout;
+use rustocker::engine::runtime::container::run_container;
+use rustocker::engine::runtime::options::ContainerOptions;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -80,7 +81,7 @@ async fn main() {
             build_layout(file, tag).await.unwrap();
         }
         Commands::Images => {
-            let store = rustocker::engine::paths::RustockerPaths::image_store_dir();
+            let store = rustocker::engine::support::paths::RustockerPaths::image_store_dir();
             println!("{:<20} {:<15}", "ALIAS", "SIZE");
             println!("{}", "-".repeat(38));
             std::fs::read_dir(&store).ok();
@@ -99,7 +100,7 @@ async fn main() {
             }
         }
         Commands::Layouts => {
-            let store = rustocker::engine::paths::RustockerPaths::layout_store_dir();
+            let store = rustocker::engine::support::paths::RustockerPaths::layout_store_dir();
             println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
             println!("{}", "-".repeat(38));
 
