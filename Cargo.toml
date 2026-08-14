@@ -24,6 +24,7 @@ rtnetlink = "0.22.0"
 futures = "0.3.34"
 ipnet = {  version = "2.12.1", features = ["serde"] }
 thiserror = "2.0.20"
+iptables = "0.6.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

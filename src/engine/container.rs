@@ -74,22 +74,24 @@ pub(crate) fn resolve_memory_limit(
 pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     println!("[HOST] Running a container...");
-
+    let bridge_name = "rustocker0";
+    let subnet_mask = "172.19.0.0/16";
+    
     let network_manager = NetworkManager::new(
-        "rustocker0".to_string(),
+        bridge_name.to_string(),
         Ipv4Addr::new(172, 19, 0, 1),
         16
     ).await
         .map_err(|e| e.to_string())?;
 
     let ipam = Ipam::new(
-        "172.19.0.0/16",
+        subnet_mask,
         RustockerPaths::base_dir().join("ipam.json")
     ).map_err(|e| e.to_string())?;
 
     network_manager.init_global_network().await
         .map_err(|e| e.to_string())?;
-
+    
     let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
     if !layout_dir.exists() {
         return Err(format!(

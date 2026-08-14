@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use rtnetlink::{new_connection, Handle, LinkVeth, LinkBridge, LinkMessageBuilder, LinkUnspec, RouteMessageBuilder};
 use futures::stream::TryStreamExt;
-use futures::{StreamExt, TryFutureExt};
 use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -68,7 +67,7 @@ impl Ipam {
                 allocations: HashMap::new()
             };
 
-            let mut ipam = Self {
+            let ipam = Self {
                 db_path: db_path.as_ref().to_path_buf(),
                 state: Arc::new(Mutex::new(new_state)),
             };
@@ -108,7 +107,7 @@ impl Ipam {
         let allocated_set : std::collections::HashSet<Ipv4Addr> =
             state.allocations.values().copied().collect();
 
-        let gateway = state.gateway;
+        let _gateway = state.gateway;
         let next_ip = state
             .subnet
             .hosts()
@@ -204,6 +203,74 @@ impl NetworkManager {
             ).execute().await?;
         println!("[NETWORK] Set UP bridge: {}", self.bridge_name);
 
+        println!("[NETWORK] Setting iptables rules");
+        self.add_iptables_rules(self.bridge_name.as_str(), format!("{}/{}", self.gateway_ip, self.subnet_prefix).as_str()).await?;
+
+        Ok(())
+    }
+
+    pub async fn add_iptables_rules(&self, bridge_name: &str, subnet_mask: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let ipt = iptables::new(false)?;
+
+        if !ipt.chain_exists("filter", "RUSTOCKER")? {
+            ipt.new_chain("filter", "RUSTOCKER")?;
+            println!("[NETWORK] Created new ");
+        }
+
+        let rule = format!("-s {} ! -o {} -j MASQUERADE", subnet_mask, bridge_name);
+
+        if !ipt.exists("nat", "POSTROUTING", rule.as_str())? {
+            ipt.append("nat", "POSTROUTING", rule.as_str())?;
+            println!("[IPTABLES] Added NAT rule: {}", subnet_mask);
+        }
+
+        let forward_rule = format!("-s {} ! -o {} -j ACCEPT", subnet_mask, bridge_name);
+        if !ipt.exists("filter", "RUSTOCKER", &forward_rule)? {
+            ipt.append("filter", "RUSTOCKER", &forward_rule)?;
+            println!("[IPTABLES] Allowed forwarding from {} to {}", subnet_mask, bridge_name);
+        }
+
+        let return_rule = format!(
+            "-o {} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+            bridge_name
+        );
+        if !ipt.exists("filter", "RUSTOCKER", &return_rule)? {
+            ipt.append("filter", "RUSTOCKER", &return_rule)?;
+            println!("[IPTABLES] Added filter rule for {}", bridge_name);
+        }
+
+        if !ipt.exists("filter", "FORWARD", "-j RUSTOCKER")? {
+            ipt.append("filter", "FORWARD", "-j RUSTOCKER")?;
+            println!("[IPTABLES] Appended RUSTOCKER chain to FORWARD");
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_iptables_rules(&self, bridge_name: &str, subnet_mask: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let ipt = iptables::new(false)?;
+        let rule = format!("-s {} -o {} -j MASQUERADE", subnet_mask, bridge_name);
+
+        if ipt.exists("nat", "POSTROUTING", &rule)? {
+            ipt.delete("nat", "POSTROUTING", &rule)?;
+            println!("[IPTABLES] Removed MASQUERADE rule.");
+        }
+
+        let forward_rule = format!("-s {} ! -o {} -j FORWARD", subnet_mask, bridge_name);
+        if ipt.exists("filter", "FORWARD", &forward_rule)? {
+            ipt.delete("filter", "FORWARD", &forward_rule)?;
+            println!("[IPTABLES] Removed forwarding for {}", bridge_name);
+        }
+
+        let return_rule = format!(
+            "-o {} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+            bridge_name
+        );
+        if ipt.exists("filter", "FORWARD", &return_rule)? {
+            ipt.delete("filter", "FORWARD", &return_rule)?;
+            println!("[IPTABLES] Removed filter rule for {}", bridge_name);
+        }
+
         Ok(())
     }
 
@@ -280,7 +347,7 @@ impl NetworkManager {
 
                 handle
                     .address()
-                    .add(c_veth_id, std::net::IpAddr::V4(gateway_ip), subnet_prefix)
+                    .add(c_veth_id, std::net::IpAddr::V4(ip), subnet_prefix)
                     .execute()
                     .await?;
 

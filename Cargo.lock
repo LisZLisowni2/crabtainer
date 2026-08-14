@@ -1143,6 +1143,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptables"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f30c9a636a0a728c67d1d420471c99b215708a17c222bb9afb16d0821e2d80d8"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "is-root"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1927,6 +1937,7 @@ dependencies = [
  "globset",
  "httpmock",
  "ipnet",
+ "iptables",
  "is-root",
  "nix 0.31.3",
  "oci-client",
