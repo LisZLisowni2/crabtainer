@@ -170,7 +170,7 @@ impl NetworkManager {
     }
 
     pub async fn init_global_network(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Ok(_) = self.get_link_index(self.bridge_name.as_str()).await {
+        if self.get_link_index(self.bridge_name.as_str()).await.is_ok() {
             println!("[NETWORK WARN] Global network currently initialized. Skipping");
             return Ok(());
         }

@@ -1,4 +1,4 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use oci_client::client::{Client, ClientConfig};
 use oci_client::secrets::RegistryAuth;
 use tokio::fs::File;
@@ -14,7 +14,7 @@ pub async fn download_image_if_missing(
         .parse()
         .map_err(|e| format!(" => [DOWNLOAD] Invalid image reference: {}", e))?;
 
-    let image_dir = RustockerPaths::image_store_dir().join(&alias);
+    let image_dir = RustockerPaths::image_store_dir().join(alias);
 
     std::fs::create_dir_all(&image_dir)
         .map_err(|e| format!("=> [DOWNLOAD] Failed to create image directory: {}", e))?;
@@ -70,7 +70,7 @@ pub async fn download_image_if_missing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::test_utils::with_home;
+    use crate::engine::support::test_utils::with_home;
 
     #[tokio::test]
     async fn download_rejects_invalid_image_reference() {

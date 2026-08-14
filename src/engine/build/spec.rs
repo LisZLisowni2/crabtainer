@@ -23,11 +23,7 @@ pub async fn save_config(
         period
     };
 
-    let memory = if let Some(mem) = opts.memory_limit {
-        mem
-    } else {
-        f64::MAX
-    };
+    let memory = opts.memory_limit.unwrap_or(f64::MAX);
 
     let spec = SpecBuilder::default()
         .root(

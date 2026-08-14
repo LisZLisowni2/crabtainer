@@ -1,4 +1,4 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;

@@ -18,7 +18,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     );
 
     let target_rootfs = RustockerPaths::layout_store_dir()
-        .join(&output_layout_name)
+        .join(output_layout_name)
         .join("rootfs");
 
     std::fs::create_dir_all(&target_rootfs)
@@ -62,7 +62,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
             layer_path.file_name().unwrap_or_default()
         );
 
-        let tar_gz = std::fs::File::open(&layer_path).map_err(|e| {
+        let tar_gz = std::fs::File::open(layer_path).map_err(|e| {
             format!(
                 "=> [FROM] Failed to open layer file '{:?}': {}",
                 layer_path, e
