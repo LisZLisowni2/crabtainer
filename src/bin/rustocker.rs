@@ -16,6 +16,9 @@ enum Commands {
     Run {
         layout: String,
 
+        #[arg(short, long, default_value_t = false)]
+        detach: bool,
+
         #[arg(short = 'C', long)]
         cpu_limit: Option<f64>,
 
@@ -58,6 +61,7 @@ async fn main() {
             args,
             cpu_limit,
             memory_limit,
+            detach,
         } => {
             let mut final_command: Vec<String> = vec![];
 
@@ -74,6 +78,7 @@ async fn main() {
                 args: final_command,
                 cpu_limit,
                 memory_limit,
+                detach
             };
             run_container(options).await.unwrap();
         }
@@ -131,20 +136,22 @@ mod tests {
     }
 
     #[test]
-    fn run_parses_cpu_and_memory_limits() {
-        match parse_run(&["my-layout", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
+    fn run_parses_cpu_and_memory_limits_and_detach() {
+        match parse_run(&["my-layout", "-d", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
             Commands::Run {
                 layout,
                 cpu_limit,
                 memory_limit,
                 command,
                 args,
+                detach
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
                 assert_eq!(memory_limit, Some(2048.0));
                 assert_eq!(command, Some("/bin/sh".to_string()));
                 assert_eq!(args, None);
+                assert_eq!(detach, true);
             }
             _ => panic!("expected Run command"),
         }
@@ -159,12 +166,14 @@ mod tests {
                 memory_limit,
                 command,
                 args,
+                detach
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
                 assert_eq!(memory_limit, None);
                 assert_eq!(command, None);
                 assert_eq!(args, None);
+                assert_eq!(detach, false);
             }
             _ => panic!("expected Run command"),
         }

@@ -4,6 +4,7 @@ pub struct ContainerOptions {
     pub args: Vec<String>,
     pub cpu_limit: Option<f64>,
     pub memory_limit: Option<f64>,
+    pub detach: bool,
 }
 
 #[derive(Debug)]
