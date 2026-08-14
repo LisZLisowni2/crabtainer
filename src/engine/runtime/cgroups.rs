@@ -1,12 +1,7 @@
-use crate::engine::container::{ContainerOptions, ContainerReady};
+use crate::engine::runtime::options::ContainerReady;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-
-pub struct ResourcesLimits {
-    pub cpu_limit: Option<f64>,
-    pub memory_limit: Option<u64>,
-}
 
 pub async fn setup_cgroups(container_id: &str, opts: &ContainerReady) -> Result<PathBuf, String> {
     setup_cgroups_in(container_id, opts, Path::new("/sys/fs/cgroup")).await

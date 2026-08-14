@@ -1,6 +1,5 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use std::path::PathBuf;
-use tokio::process::Command;
 
 pub async fn from_image(base_image: &String, output_layout_name: &String) -> Result<(), String> {
     let image_dir_name = base_image.replace("/", "_").replace(".", "_");
@@ -19,7 +18,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
     );
 
     let target_rootfs = RustockerPaths::layout_store_dir()
-        .join(&output_layout_name)
+        .join(output_layout_name)
         .join("rootfs");
 
     std::fs::create_dir_all(&target_rootfs)
@@ -63,7 +62,7 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
             layer_path.file_name().unwrap_or_default()
         );
 
-        let tar_gz = std::fs::File::open(&layer_path).map_err(|e| {
+        let tar_gz = std::fs::File::open(layer_path).map_err(|e| {
             format!(
                 "=> [FROM] Failed to open layer file '{:?}': {}",
                 layer_path, e
@@ -101,12 +100,103 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
             std::fs::copy(&src_config, &dest_config)
                 .map_err(|e| format!("=> [FROM] Failed to copy layer config file: {}", e))?;
         }
-
-        println!(
-            " => [FROM] Successfully constructed rootfs for '{}'",
-            output_layout_name
-        );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::support::test_utils::with_home;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use tar::Builder;
+
+    fn layer_tar_gz() -> Vec<u8> {
+        let mut tar_gz = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut tar_gz, Compression::default());
+            let mut tar = Builder::new(encoder);
+
+            let content = b"hello from container\n";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, "rootfile.txt", &content[..]).unwrap();
+
+            let inner = tar.into_inner().unwrap();
+            inner.finish().unwrap();
+        }
+        tar_gz
+    }
+
+    #[tokio::test]
+    async fn from_image_errors_when_image_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_str().unwrap().to_string();
+
+        with_home(&home, || {
+            let err = futures::executor::block_on(from_image(
+                &"ubuntu".to_string(),
+                &"layout".to_string(),
+            ))
+            .unwrap_err();
+            assert!(
+                err.contains("not found in local store"),
+                "unexpected error: {}",
+                err
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn from_image_errors_when_no_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_str().unwrap().to_string();
+
+        with_home(&home, || {
+            let image_dir = dir.path().join("images/ubuntu");
+            std::fs::create_dir_all(&image_dir).unwrap();
+            std::fs::write(image_dir.join("config.json"), "{}").unwrap();
+
+            let err = futures::executor::block_on(from_image(
+                &"ubuntu".to_string(),
+                &"layout".to_string(),
+            ))
+            .unwrap_err();
+            assert!(
+                err.contains("No layers archive"),
+                "unexpected error: {}",
+                err
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn from_image_extracts_layers_into_layout_rootfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_str().unwrap().to_string();
+
+        with_home(&home, || {
+            let image_dir = dir.path().join("images/ubuntu");
+            std::fs::create_dir_all(&image_dir).unwrap();
+            std::fs::write(image_dir.join("layer_0.tar.gz"), layer_tar_gz()).unwrap();
+            std::fs::write(image_dir.join("config.json"), r#"{"schemaVersion":2}"#).unwrap();
+
+            futures::executor::block_on(from_image(
+                &"ubuntu".to_string(),
+                &"layout".to_string(),
+            ))
+            .unwrap();
+
+            let rootfs = dir.path().join("layouts/layout/rootfs");
+            assert_eq!(
+                std::fs::read_to_string(rootfs.join("rootfile.txt")).unwrap(),
+                "hello from container\n"
+            );
+            assert!(dir.path().join("layouts/layout/config.json").is_file());
+        });
+    }
 }

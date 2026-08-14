@@ -1,4 +1,4 @@
-use crate::engine::paths::RustockerPaths;
+use crate::engine::support::paths::RustockerPaths;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -216,4 +216,173 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn write_file(root: &Path, rel: &str) {
+        let path = root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "content").unwrap();
+    }
+
+    fn ignore_with(root: &Path, rules: &str) -> RustockerIgnore {
+        fs::write(root.join(".rustockerignore"), rules).unwrap();
+        RustockerIgnore::new(root)
+    }
+
+    fn collected(root: &Path, ig: &RustockerIgnore) -> Vec<PathBuf> {
+        let mut files = ig.collect_files(root);
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn no_ignore_file_keeps_all_files() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "a.txt");
+        write_file(dir.path(), "b.log");
+        write_file(dir.path(), "sub/c.rs");
+
+        let ig = RustockerIgnore::new(dir.path());
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![
+                PathBuf::from("a.txt"),
+                PathBuf::from("b.log"),
+                PathBuf::from("sub/c.rs")
+            ]
+        );
+    }
+
+    #[test]
+    fn rustockerignore_itself_excluded_even_without_rules() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "a.txt");
+        fs::write(dir.path().join(".rustockerignore"), "").unwrap();
+
+        let ig = RustockerIgnore::new(dir.path());
+        assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("a.txt")]);
+    }
+
+    #[test]
+    fn file_pattern_ignores_at_any_depth() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "a.txt");
+        write_file(dir.path(), "b.log");
+        write_file(dir.path(), "sub/nested.txt");
+
+        let ig = ignore_with(dir.path(), "*.txt\n");
+        assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("b.log")]);
+    }
+
+    #[test]
+    fn directory_rule_prunes_whole_subtree() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "target/debug/app");
+        write_file(dir.path(), "src/main.rs");
+
+        let ig = ignore_with(dir.path(), "target\n");
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![PathBuf::from("src/main.rs")]
+        );
+    }
+
+    #[test]
+    fn trailing_slash_directory_rule_ignores_dir() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "build/out.txt");
+        write_file(dir.path(), "src/main.rs");
+
+        let ig = ignore_with(dir.path(), "build/\n");
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![PathBuf::from("src/main.rs")]
+        );
+    }
+
+    #[test]
+    fn leading_slash_anchors_rule_to_root() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "node_modules/a.js");
+        write_file(dir.path(), "sub/node_modules/b.js");
+
+        let ig = ignore_with(dir.path(), "/node_modules\n");
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![PathBuf::from("sub/node_modules/b.js")]
+        );
+    }
+
+    #[test]
+    fn wildcard_pattern_ignores_matches() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "src/a.rs");
+        write_file(dir.path(), "src/b.rs");
+        write_file(dir.path(), "docs/readme.md");
+
+        let ig = ignore_with(dir.path(), "src/*.rs\n");
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![PathBuf::from("docs/readme.md")]
+        );
+    }
+
+    #[test]
+    fn negation_reincludes_specific_file() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "keep.txt");
+        write_file(dir.path(), "drop.txt");
+
+        let ig = ignore_with(dir.path(), "*.txt\n!keep.txt\n");
+        assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("keep.txt")]);
+    }
+
+    #[test]
+    fn later_negation_overrides_previous_rule() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "a.txt");
+        write_file(dir.path(), "keep.txt");
+
+        let ig = ignore_with(dir.path(), "*\n!keep.txt\n");
+        assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("keep.txt")]);
+    }
+
+    #[test]
+    fn later_rule_overrides_previous_negation() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "keep.txt");
+
+        let ig = ignore_with(dir.path(), "!keep.txt\n*\n");
+        assert_eq!(collected(dir.path(), &ig), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn negated_directory_reincludes_contents() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "build/main.rs");
+        write_file(dir.path(), "keep/lib.rs");
+
+        let ig = ignore_with(dir.path(), "*\n!keep/\n");
+        assert_eq!(
+            collected(dir.path(), &ig),
+            vec![PathBuf::from("keep/lib.rs")]
+        );
+    }
+
+    #[test]
+    fn comments_and_blank_lines_are_skipped() {
+        let dir = tempdir().unwrap();
+        write_file(dir.path(), "a.txt");
+        write_file(dir.path(), "b.log");
+
+        let ig = ignore_with(dir.path(), "# comment\n\n*.txt\n");
+        assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("b.log")]);
+    }
 }

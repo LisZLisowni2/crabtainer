@@ -1,6 +1,6 @@
-use crate::engine::cgroups::{attach_process_to_cgroup, setup_cgroups};
-use crate::engine::paths::RustockerPaths;
-use clap::arg;
+use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
+use crate::engine::support::paths::RustockerPaths;
+use crate::engine::runtime::network::{Ipam, NetworkManager};
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
@@ -9,23 +9,8 @@ use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
+use std::net::Ipv4Addr;
 use std::path::Path;
-
-#[derive(Debug)]
-pub struct ContainerOptions {
-    pub layout_name: String,
-    pub args: Vec<String>,
-    pub cpu_limit: Option<f64>,
-    pub memory_limit: Option<f64>,
-}
-
-#[derive(Debug)]
-pub struct ContainerReady {
-    pub layout_name: String,
-    pub args: Vec<String>,
-    pub quota: Option<i64>,
-    pub memory_limit: Option<i64>,
-}
 
 pub(crate) fn generate_container_id() -> String {
     let mut rng = rand::rng();
@@ -35,7 +20,7 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub(crate) fn resolve_args(args: &[String], layout_args: &Vec<String>) -> Vec<String> {
+pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
@@ -47,11 +32,7 @@ pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Optio
     if let Some(cpu) = cpu_limit {
         (*cpu as i64) * 100000i64
     } else {
-        if let Some(cpu) = layout_cpu_limit {
-            cpu
-        } else {
-            100000
-        }
+        layout_cpu_limit.unwrap_or(100000)
     }
 }
 
@@ -62,18 +43,31 @@ pub(crate) fn resolve_memory_limit(
     if let Some(memory) = memory_limit {
         *memory as i64
     } else {
-        if let Some(memory) = layout_memory_limit {
-            memory
-        } else {
-            100000
-        }
+        layout_memory_limit.unwrap_or(1024 * 1024 * 1024) // 1GB default
     }
 }
 
-pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
+pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptions) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     println!("[HOST] Running a container...");
+    let bridge_name = "rustocker0";
+    let subnet_mask = "172.19.0.0/16";
+    
+    let network_manager = NetworkManager::new(
+        bridge_name.to_string(),
+        Ipv4Addr::new(172, 19, 0, 1),
+        16
+    ).await
+        .map_err(|e| e.to_string())?;
 
+    let ipam = Ipam::new(
+        subnet_mask,
+        RustockerPaths::base_dir().join("ipam.json")
+    ).map_err(|e| e.to_string())?;
+
+    network_manager.init_global_network().await
+        .map_err(|e| e.to_string())?;
+    
     let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
     if !layout_dir.exists() {
         return Err(format!(
@@ -111,6 +105,9 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
     let container_id = generate_container_id();
+    let assigned_ip = ipam.allocate(&container_id).await.map_err(|e| e.to_string())?;
+
+    println!("[IPAM] Assigned IP for container {}: {}", &container_id, assigned_ip);
 
     let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
 
@@ -142,7 +139,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     println!("[HOST] Starting container {}", container_id);
 
-    let final_opts = ContainerReady {
+    let final_opts = crate::engine::runtime::options::ContainerReady {
         layout_name: opts.layout_name,
         args,
         quota: Some(cpu_limit),
@@ -156,7 +153,10 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
 
     let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
 
-    let flags = CloneFlags::CLONE_NEWUTS | CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
+    let flags = CloneFlags::CLONE_NEWUTS |
+            CloneFlags::CLONE_NEWPID |
+            CloneFlags::CLONE_NEWNS |
+            CloneFlags::CLONE_NEWNET;
 
     let child_pid = unsafe {
         clone(
@@ -168,6 +168,11 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
         .expect("[ERROR] Failed to spawn child.")
     };
 
+    network_manager
+        .attach_container(container_id.as_str(), child_pid.as_raw().cast_unsigned(), assigned_ip)
+        .await
+        .map_err(|e| e.to_string())?;
+    
     if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid).await {
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
@@ -177,6 +182,9 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
+
+    let released_ip = ipam.release(&container_id).await.map_err(|e| e.to_string())?;
+    println!("[IPAM] Released IP for container {}: {}", &container_id, released_ip);
 
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
@@ -196,7 +204,7 @@ pub async fn run_container(opts: ContainerOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn child_process(rootfs: &Path, container_id: &String, options: &ContainerReady) -> isize {
+fn child_process(rootfs: &Path, container_id: &String, options: &crate::engine::runtime::options::ContainerReady) -> isize {
     sethostname(container_id).ok();
 
     if let Err(e) = mount(
@@ -289,6 +297,15 @@ mod tests {
     }
 
     #[test]
+    fn generate_container_ids_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            assert!(seen.insert(generate_container_id()), "duplicate container id");
+        }
+        assert_eq!(seen.len(), 1000);
+    }
+
+    #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&vec![], &layout_args), vec!["-lh"]);
@@ -337,7 +354,7 @@ mod tests {
 
     #[test]
     fn resolve_memory_limit_defaults_when_nothing_given() {
-        assert_eq!(resolve_memory_limit(&None, None), 100000);
+        assert_eq!(resolve_memory_limit(&None, None), 1024 * 1024 * 1024);
     }
 
     #[test]
