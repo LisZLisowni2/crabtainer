@@ -394,3 +394,105 @@ impl NetworkManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn new_ipam(subnet: &str, db_path: PathBuf) -> Ipam {
+        Ipam::new(subnet, db_path).unwrap()
+    }
+
+    #[tokio::test]
+    async fn new_derives_gateway_and_subnet_from_cidr() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
+        assert_eq!(ipam.gateway().await, Ipv4Addr::new(172, 19, 0, 1));
+        assert_eq!(ipam.subnet().await, 16);
+    }
+
+    #[tokio::test]
+    async fn new_rejects_invalid_cidr() {
+        let dir = tempdir().unwrap();
+        let result = Ipam::new("not-a-cidr", dir.path().join("ipam.json"));
+        assert!(matches!(result, Err(IpamError::Io(_))));
+    }
+
+    #[tokio::test]
+    async fn allocate_starts_after_gateway_and_increments() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
+        assert_eq!(
+            ipam.allocate(&"c1".to_string()).await.unwrap(),
+            Ipv4Addr::new(172, 19, 0, 2)
+        );
+        assert_eq!(
+            ipam.allocate(&"c2".to_string()).await.unwrap(),
+            Ipv4Addr::new(172, 19, 0, 3)
+        );
+    }
+
+    #[tokio::test]
+    async fn allocate_is_idempotent_for_same_container() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
+        let first = ipam.allocate(&"c1".to_string()).await.unwrap();
+        let second = ipam.allocate(&"c1".to_string()).await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, Ipv4Addr::new(172, 19, 0, 2));
+    }
+
+    #[tokio::test]
+    async fn allocate_exhausts_small_subnet() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/30", dir.path().join("ipam.json"));
+        assert_eq!(
+            ipam.allocate(&"c1".to_string()).await.unwrap(),
+            Ipv4Addr::new(172, 19, 0, 2)
+        );
+        let err = ipam.allocate(&"c2".to_string()).await.unwrap_err();
+        assert!(matches!(err, IpamError::SubnetExhausted));
+    }
+
+    #[tokio::test]
+    async fn release_returns_ip_and_frees_it_for_reuse() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
+        let ip = ipam.allocate(&"c1".to_string()).await.unwrap();
+        assert_eq!(ipam.release(&"c1".to_string()).await.unwrap(), ip);
+
+        let next = ipam.allocate(&"c2".to_string()).await.unwrap();
+        assert_eq!(next, ip);
+    }
+
+    #[tokio::test]
+    async fn release_unknown_container_errors() {
+        let dir = tempdir().unwrap();
+        let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
+        let err = ipam.release(&"ghost".to_string()).await.unwrap_err();
+        assert!(matches!(err, IpamError::ContainerNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn state_persists_and_restores_on_reload() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("ipam.json");
+        {
+            let ipam = new_ipam("172.19.0.0/16", db.clone());
+            ipam.allocate(&"c1".to_string()).await.unwrap();
+        }
+
+        let ipam = new_ipam("172.19.0.0/16", db);
+        assert_eq!(ipam.gateway().await, Ipv4Addr::new(172, 19, 0, 1));
+        assert_eq!(ipam.subnet().await, 16);
+        assert_eq!(
+            ipam.allocate(&"c1".to_string()).await.unwrap(),
+            Ipv4Addr::new(172, 19, 0, 2)
+        );
+        assert_eq!(
+            ipam.allocate(&"c2".to_string()).await.unwrap(),
+            Ipv4Addr::new(172, 19, 0, 3)
+        );
+    }
+}

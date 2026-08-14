@@ -66,3 +66,25 @@ pub async fn download_image_if_missing(
     );
     Ok(image_dir)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::test_utils::with_home;
+
+    #[tokio::test]
+    async fn download_rejects_invalid_image_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_str().unwrap().to_string();
+
+        with_home(&home, || {
+            let err = futures::executor::block_on(download_image_if_missing("", "alias"))
+                .unwrap_err();
+            assert!(
+                err.contains("Invalid image reference"),
+                "unexpected error: {}",
+                err
+            );
+        });
+    }
+}

@@ -41,25 +41,7 @@ impl RustockerPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_home<T>(home: &str, f: impl FnOnce() -> T) -> T {
-        let _guard = ENV_LOCK.lock().unwrap();
-        // SAFETY: serialized behind ENV_LOCK so no other thread touches this env var.
-        unsafe { std::env::set_var("RUSTOCKER_HOME", home) };
-        let result = f();
-        unsafe { std::env::remove_var("RUSTOCKER_HOME") };
-        result
-    }
-
-    fn without_home<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = ENV_LOCK.lock().unwrap();
-        // SAFETY: serialized behind ENV_LOCK.
-        unsafe { std::env::remove_var("RUSTOCKER_HOME") };
-        f()
-    }
+    use crate::engine::test_utils::{with_home, without_home};
 
     #[test]
     fn base_dir_defaults_to_var_rustocker() {

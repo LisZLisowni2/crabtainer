@@ -197,6 +197,59 @@ CMD /bin/sh -c
     }
 
     #[test]
+    fn download_parses_ref_alias_syntax() {
+        let parsed = Rustockerfile::parse("DOWNLOAD ubuntu:latest AS ubuntu\n").unwrap();
+        assert_eq!(
+            parsed.instructions,
+            vec![Instruction::Download {
+                image_ref: "ubuntu:latest".to_string(),
+                alias: "ubuntu".to_string(),
+            },]
+        );
+    }
+
+    #[test]
+    fn download_requires_as_keyword() {
+        let err = Rustockerfile::parse("DOWNLOAD ubuntu\n").unwrap_err();
+        assert!(err.contains("Line 1"));
+        assert!(err.contains("DOWNLOAD syntax requires format"));
+
+        let err = Rustockerfile::parse("DOWNLOAD ubuntu myalias\n").unwrap_err();
+        assert!(err.contains("Line 1"));
+        assert!(err.contains("DOWNLOAD syntax requires format"));
+    }
+
+    #[test]
+    fn download_requires_url() {
+        let err = Rustockerfile::parse("DOWNLOAD\n").unwrap_err();
+        assert!(err.contains("Line 1"));
+        assert!(err.contains("URL is required"));
+    }
+
+    #[test]
+    fn leading_whitespace_and_tabs_are_tolerated() {
+        let parsed = Rustockerfile::parse("   FROM alpine\n\tRUN ls\n  COPY a b\n").unwrap();
+        assert_eq!(
+            parsed.instructions,
+            vec![
+                Instruction::From("alpine".to_string()),
+                Instruction::Run("ls".to_string()),
+                Instruction::Copy {
+                    src: "a".to_string(),
+                    dst: "b".to_string()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_limit_requires_argument() {
+        let err = Rustockerfile::parse("MEMORY_LIMIT\n").unwrap_err();
+        assert!(err.contains("Line 1"));
+        assert!(err.contains("MEMORY_LIMIT"));
+    }
+
+    #[test]
     fn keywords_are_case_insensitive() {
         let parsed = Rustockerfile::parse("from ubuntu\ncopy a /b\nrun ls\n").unwrap();
         assert_eq!(

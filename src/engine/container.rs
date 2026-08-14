@@ -321,6 +321,15 @@ mod tests {
     }
 
     #[test]
+    fn generate_container_ids_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            assert!(seen.insert(generate_container_id()), "duplicate container id");
+        }
+        assert_eq!(seen.len(), 1000);
+    }
+
+    #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&vec![], &layout_args), vec!["-lh"]);
