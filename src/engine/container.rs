@@ -66,7 +66,7 @@ pub(crate) fn resolve_memory_limit(
         if let Some(memory) = layout_memory_limit {
             memory
         } else {
-            100000
+            1024 * 1024 * 1024 // 1GB
         }
     }
 }
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn resolve_memory_limit_defaults_when_nothing_given() {
-        assert_eq!(resolve_memory_limit(&None, None), 100000);
+        assert_eq!(resolve_memory_limit(&None, None), 1024 * 1024 * 1024);
     }
 
     #[test]
