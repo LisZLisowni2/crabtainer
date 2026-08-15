@@ -7,7 +7,7 @@ impl RustockerPaths {
     pub fn base_dir() -> PathBuf {
         std::env::var("RUSTOCKER_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/var/rustocker"))
+            .unwrap_or_else(|_| PathBuf::from("/var/lib/rustocker"))
     }
 
     pub fn image_store_dir() -> PathBuf {

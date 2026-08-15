@@ -6,6 +6,7 @@ use rustocker::engine::runtime::options::{ContainerOptions, RuntimeConfig};
 use rustocker::engine::support::paths::RustockerPaths;
 use std::os::fd::{AsFd, AsRawFd};
 use std::ptr::null;
+use rustocker::engine::runtime::exec::ExecOptions;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -60,13 +61,22 @@ enum Commands {
         id: String,
     },
     Exec {
-        id: String,
-
         #[arg(short, long, default_value_t = false)]
         interactive: bool,
 
         #[arg(short, long, default_value_t = false)]
         tty: bool,
+
+        id: String,
+
+        cmd: String,
+
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            requires = "cmd"
+        )]
+        args: Option<Vec<String>>,
     },
     Images,
     Layouts,
@@ -195,17 +205,10 @@ async fn main() {
             id,
             interactive,
             tty,
+            cmd,
+            args
         } => {
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
-
-            let namespaces = [
-                ("ipc", CloneFlags::CLONE_NEWIPC),
-                ("uts", CloneFlags::CLONE_NEWUTS),
-                ("net", CloneFlags::CLONE_NEWNET),
-                ("pid", CloneFlags::CLONE_NEWPID),
-                ("mnt", CloneFlags::CLONE_NEWNS),
-            ];
-
             let mut target_pid: u32 = 0;
 
             if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
@@ -216,17 +219,31 @@ async fn main() {
                     Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", &id),
                 }
             }
+  
+            let opts = ExecOptions {
+                interactive,
+                tty,
+                cmd,
+                args
+            };
 
-            if target_pid > 0 {
-                for (ns_name, flag) in namespaces {
-                    let ns_path = format!("/proc/{}/ns/{}", target_pid, ns_name);
-                    if let Ok(file) = std::fs::File::open(&ns_path) {
-                        nix::sched::setns(file.as_fd(), flag).unwrap();
-                    }
-                }
-            }
+            handle_exec(target_pid, id, opts)
+                .await
+                .expect("[ERROR] Failed to execute handle_exec");
         }
     }
+}
+
+pub async fn handle_exec(container_pid: u32, container_id: String, opts: ExecOptions) -> Result<(), Box<dyn std::error::Error>> {
+    tokio::task::spawn_blocking(move || {
+        rustocker::engine::runtime::exec::exec_in_container(
+            container_pid,
+            container_id,
+            opts
+        ).expect("[ERROR] Failed to exec in container");
+    }).await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
