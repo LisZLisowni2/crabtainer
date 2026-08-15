@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use rustocker::engine::build::builder::build_layout;
-use rustocker::engine::runtime::container::run_container;
-use rustocker::engine::runtime::options::ContainerOptions;
+use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
+use rustocker::engine::runtime::options::{ContainerOptions, RuntimeConfig};
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -18,6 +18,12 @@ enum Commands {
 
         #[arg(short, long, default_value_t = false)]
         detach: bool,
+        
+        #[arg(long, default_value_t = false)]
+        rm: bool,
+
+        #[arg(short, long, default_value = "")]
+        name: Option<String>,
 
         #[arg(short = 'C', long)]
         cpu_limit: Option<f64>,
@@ -42,6 +48,7 @@ enum Commands {
         #[arg(short, long)]
         tag: String,
     },
+    Ps,
     Images,
     Layouts,
 }
@@ -61,6 +68,8 @@ async fn main() {
             args,
             cpu_limit,
             memory_limit,
+            rm,
+            name,
             detach,
         } => {
             let mut final_command: Vec<String> = vec![];
@@ -78,9 +87,17 @@ async fn main() {
                 args: final_command,
                 cpu_limit,
                 memory_limit,
-                detach
+                container_name: name,
+                rm
             };
-            run_container(options).await.unwrap();
+
+            let container_id = rustocker::engine::runtime::container::generate_container_id();
+            
+            if !detach {
+                run_container(options, container_id).await.unwrap();
+            } else {
+                spawn_detach_container(options, container_id).await.unwrap();
+            }
         }
         Commands::Build { file, tag } => {
             build_layout(file, tag).await.unwrap();
@@ -122,6 +139,28 @@ async fn main() {
                 }
             }
         }
+        Commands::Ps => {
+            let container_dir = rustocker::engine::support::paths::RustockerPaths::runtime_dir();
+            println!("{:<15} {:<20} {:<20} {:<15}", "ID", "NAME", "LAYOUT", "STATUS");
+            println!("{}", "-".repeat(80));
+            if let Ok(entries) = std::fs::read_dir(container_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let id = path
+                        .file_stem()
+                        .unwrap()
+                        .to_str()
+                        .unwrap();
+                    
+                    let runtime_config_path = path.join("config.json");
+                    let data: RuntimeConfig = serde_json::from_str(
+                        std::fs::read_to_string(runtime_config_path).unwrap().as_str()
+                    ).expect("Error reading runtime config");
+
+                    println!("{:<15} {:<20} {:<20} {:<15}", id, data.container_name, data.layout_name, data.status);
+                }
+            }
+        }
     }
 }
 
@@ -136,15 +175,17 @@ mod tests {
     }
 
     #[test]
-    fn run_parses_cpu_and_memory_limits_and_detach() {
-        match parse_run(&["my-layout", "-d", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
+    fn run_parses_all_parameters() {
+        match parse_run(&["my-layout", "-n", "MyContainer", "--rm", "-d", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
             Commands::Run {
                 layout,
                 cpu_limit,
                 memory_limit,
                 command,
                 args,
-                detach
+                name,
+                detach,
+                rm
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -152,6 +193,8 @@ mod tests {
                 assert_eq!(command, Some("/bin/sh".to_string()));
                 assert_eq!(args, None);
                 assert_eq!(detach, true);
+                assert_eq!(name, Some("MyContainer".to_string()));
+                assert_eq!(rm, true);
             }
             _ => panic!("expected Run command"),
         }
@@ -165,8 +208,10 @@ mod tests {
                 cpu_limit,
                 memory_limit,
                 command,
+                name,
                 args,
-                detach
+                detach,
+                rm
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
@@ -174,6 +219,8 @@ mod tests {
                 assert_eq!(command, None);
                 assert_eq!(args, None);
                 assert_eq!(detach, false);
+                assert_eq!(name, None);
+                assert_eq!(rm, false);
             }
             _ => panic!("expected Run command"),
         }

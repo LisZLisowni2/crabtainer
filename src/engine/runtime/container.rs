@@ -4,15 +4,23 @@ use crate::engine::runtime::network::{Ipam, NetworkManager};
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
-use nix::unistd::{chdir, execvp, sethostname};
+use nix::unistd::{chdir, execvp, fork, sethostname, setsid, ForkResult, dup2_stdin, dup2_stdout, dup2_stderr};
 use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
+use std::fs::File;
 use std::net::Ipv4Addr;
-use std::path::Path;
+use std::os::fd::AsFd;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use nix::fcntl::OFlag;
+use nix::libc::open;
+use nix::sys::stat::Mode;
+use serde_json::json;
+use crate::engine::runtime::options::ContainerOptions;
 
-pub(crate) fn generate_container_id() -> String {
+pub fn generate_container_id() -> String {
     let mut rng = rand::rng();
 
     let bytes: [u8; 6] = rng.random();
@@ -20,7 +28,7 @@ pub(crate) fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
+pub fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
@@ -28,7 +36,7 @@ pub(crate) fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<Strin
     }
 }
 
-pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
+pub fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
     if let Some(cpu) = cpu_limit {
         (*cpu as i64) * 100000i64
     } else {
@@ -36,7 +44,7 @@ pub(crate) fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Optio
     }
 }
 
-pub(crate) fn resolve_memory_limit(
+pub fn resolve_memory_limit(
     memory_limit: &Option<f64>,
     layout_memory_limit: Option<i64>,
 ) -> i64 {
@@ -47,12 +55,11 @@ pub(crate) fn resolve_memory_limit(
     }
 }
 
-pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptions) -> Result<(), String> {
-    const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
-    println!("[HOST] Running a container...");
+pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[HOST] Spawning container {}...", container_id);
+
     let bridge_name = "rustocker0";
-    let subnet_mask = "172.19.0.0/16";
-    
+    let subnet_mask = "172.19.0.1/16";
     let network_manager = NetworkManager::new(
         bridge_name.to_string(),
         Ipv4Addr::new(172, 19, 0, 1),
@@ -67,7 +74,225 @@ pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptio
 
     network_manager.init_global_network().await
         .map_err(|e| e.to_string())?;
-    
+
+    let assigned_ip = ipam.allocate(&container_id).await.map_err(|e| e.to_string())?;
+
+    let runtime_path = RustockerPaths::runtime_dir().join(&container_id);
+    fs::create_dir_all(&runtime_path)?;
+
+    let mut container_pid: Option<nix::unistd::Pid> = None;
+    let container_id_clone = container_id.clone();
+
+    tokio::task::spawn_blocking(move || {
+        match unsafe { fork() }.expect("[HOST] Failed to fork") {
+            ForkResult::Parent { child } => {
+                let pid_file = runtime_path.join("pid");
+                fs::write(pid_file, child.as_raw().to_string().as_bytes()).unwrap();
+                println!("[HOST] PID file written to file. {}", child);
+            }
+            ForkResult::Child => {
+                setsid().expect("[HOST] Failed to setsid");
+
+                let stdout = std::io::stdout();
+                let stderr = std::io::stderr();
+                let stdin = std::io::stdin();
+
+                let saved_stdout = stdout.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stdout");
+                let saved_stderr = stderr.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stderr");
+                let saved_stdin = stdin.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stdin");
+
+                let log_fd = nix::fcntl::open(
+                    runtime_path.join("container.log").as_path(),
+                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    Mode::from_bits_truncate(644)
+                ).expect("[HOST] Failed to open container.log");
+
+                let error_fd = nix::fcntl::open(
+                    runtime_path.join("error.log").as_path(),
+                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    Mode::from_bits_truncate(644)
+                ).expect("[HOST] Failed to open error.log");
+
+                let dev_null = nix::fcntl::open(
+                    PathBuf::from("/dev/null").as_path(),
+                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    Mode::empty(),
+                ).expect("[HOST] Failed to open /dev/null");
+
+                dup2_stdin(&dev_null).unwrap();
+                dup2_stdout(&log_fd).unwrap();
+                dup2_stderr(&error_fd).unwrap();
+
+                const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
+                let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
+                if !layout_dir.exists() {
+                    return Err(format!(
+                        "Layout '{}' doesn't exist! Build it first using 'rustocker build'.",
+                        opts.layout_name
+                    ));
+                }
+                let layout_rootfs = layout_dir.join("rootfs");
+
+                let layout_opts: oci_spec::runtime::Spec = Spec::load(layout_dir.join("config.json")).unwrap();
+
+                let default_args = layout_opts
+                    .process()
+                    .as_ref()
+                    .and_then(|p| p.args().as_ref());
+
+                let default_cpu = layout_opts
+                    .linux()
+                    .as_ref()
+                    .and_then(|l| l.resources().as_ref())
+                    .and_then(|r| r.cpu().as_ref())
+                    .and_then(|c| c.quota());
+
+                let default_memory = layout_opts
+                    .linux()
+                    .as_ref()
+                    .and_then(|l| l.resources().as_ref())
+                    .and_then(|r| r.memory().as_ref())
+                    .and_then(|m| m.limit());
+
+                let args = resolve_args(&opts.args, default_args.unwrap());
+
+                let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
+
+                let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
+
+                println!("[IPAM] Assigned IP for container {}: {}", &container_id, assigned_ip);
+
+                let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
+
+                let upper_dir = container_workdir.join("upper");
+                let work_dir = container_workdir.join("work");
+                let merged_rootfs = container_workdir.join("rootfs");
+
+                fs::create_dir_all(&upper_dir).map_err(|e| format!("Upperdir failed to create: {}", e))?;
+                fs::create_dir_all(&work_dir).map_err(|e| format!("Workdir failed to create: {}", e))?;
+                fs::create_dir_all(&merged_rootfs).map_err(|e| format!("Rootfs failed to create: {}", e))?;
+
+                let overlay_opts = format!(
+                    "lowerdir={},upperdir={},workdir={}",
+                    layout_rootfs.to_str().unwrap(),
+                    upper_dir.to_str().unwrap(),
+                    work_dir.to_str().unwrap()
+                );
+
+                println!("[HOST] Mount overlayfs");
+
+                mount(
+                    Some("overlay"),
+                    &merged_rootfs,
+                    Some("overlay"),
+                    MsFlags::empty(),
+                    Some(overlay_opts.as_str()),
+                )
+                    .expect("[ERROR] Failed to mount overlayfs");
+
+                println!("[HOST] Starting container {}", container_id);
+
+                let final_opts = crate::engine::runtime::options::ContainerReady {
+                    layout_name: opts.layout_name.clone(),
+                    args,
+                    quota: Some(cpu_limit),
+                    memory_limit: Some(memory_limit),
+                };
+
+                let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
+
+                let proc_dir = merged_rootfs.join("proc");
+                fs::create_dir_all(&proc_dir).ok();
+
+                let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
+
+                let flags = CloneFlags::CLONE_NEWUTS |
+                    CloneFlags::CLONE_NEWPID |
+                    CloneFlags::CLONE_NEWNS |
+                    CloneFlags::CLONE_NEWNET;
+
+                let child_pid = unsafe {
+                    clone(
+                        Box::new(|| child_process(&merged_rootfs, &container_id, &final_opts)),
+                        &mut stack[..],
+                        flags,
+                        Some(Signal::SIGCHLD as i32),
+                    )
+                        .expect("[ERROR] Failed to spawn child.")
+                };
+
+                let container_name = if let Some(name) = &opts.container_name {
+                    name.clone()
+                } else {
+                    container_id.clone().to_string()
+                };
+                let cwd = layout_opts
+                    .process()
+                    .as_ref()
+                    .and_then(|p| p.cwd().to_str())
+                    .expect("[ERROR] Failed to get work dir");
+
+                let runtime_config = crate::engine::runtime::options::RuntimeConfig {
+                    container_name,
+                    status: crate::engine::runtime::options::ContainerStatus::Active,
+                    layout_name: opts.layout_name.clone(),
+                    ip_address: assigned_ip,
+                    workdir: PathBuf::from(cwd),
+                    pid: child_pid.as_raw().cast_unsigned(),
+                };
+
+                fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+                container_pid = Some(child_pid);
+
+                if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
+                    eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
+                };
+
+                nix::unistd::close(dev_null).expect("[ERROR] Failed to close dev_null fd");
+                nix::unistd::close(log_fd).expect("[ERROR] Failed to close log_fd");
+                nix::unistd::close(error_fd).expect("[ERROR] Failed to close error_fd");
+
+                dup2_stdin(saved_stdin).expect("[ERROR] Failed to dup2 stdin");
+                dup2_stderr(saved_stderr).expect("[ERROR] Failed to dup2 stderr");
+                dup2_stdout(saved_stdout).expect("[ERROR] Failed to dup2 stdout");
+            }
+        };
+
+        Ok(())
+    })
+        .await??;
+
+    if let Some(pid) = container_pid {
+        network_manager
+            .attach_container(container_id_clone.as_str(), pid.as_raw().cast_unsigned(), assigned_ip)
+            .await
+            .map_err(|e| e.to_string())
+            .expect("[ERROR] Failed to attach container to network");
+    }
+
+    Ok(())
+}
+
+pub async fn run_container(opts: ContainerOptions, container_id: String) -> Result<(), String> {
+    const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
+    println!("[HOST] Running a container...");
+    let bridge_name = "rustocker0";
+    let subnet_mask = "172.19.0.0/16";
+    let network_manager = NetworkManager::new(
+        bridge_name.to_string(),
+        Ipv4Addr::new(172, 19, 0, 1),
+        16
+    ).await
+        .map_err(|e| e.to_string())?;
+
+    let ipam = Ipam::new(
+        subnet_mask,
+        RustockerPaths::base_dir().join("ipam.json")
+    ).map_err(|e| e.to_string())?;
+
+    network_manager.init_global_network().await
+        .map_err(|e| e.to_string())?;
+
     let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
     if !layout_dir.exists() {
         return Err(format!(
@@ -104,7 +329,6 @@ pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptio
 
     let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
-    let container_id = generate_container_id();
     let assigned_ip = ipam.allocate(&container_id).await.map_err(|e| e.to_string())?;
 
     println!("[IPAM] Assigned IP for container {}: {}", &container_id, assigned_ip);
@@ -140,13 +364,13 @@ pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptio
     println!("[HOST] Starting container {}", container_id);
 
     let final_opts = crate::engine::runtime::options::ContainerReady {
-        layout_name: opts.layout_name,
+        layout_name: opts.layout_name.clone(),
         args,
         quota: Some(cpu_limit),
         memory_limit: Some(memory_limit),
     };
 
-    let cgroup_dir = setup_cgroups(&container_id, &final_opts).await?;
+    let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
 
     let proc_dir = merged_rootfs.join("proc");
     fs::create_dir_all(&proc_dir).ok();
@@ -168,12 +392,34 @@ pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptio
         .expect("[ERROR] Failed to spawn child.")
     };
 
+    let container_name = if let Some(name) = &opts.container_name {
+        name.clone()
+    } else {
+        container_id.to_string()
+    };
+    let cwd = layout_opts
+        .process()
+        .as_ref()
+        .and_then(|p| p.cwd().to_str())
+        .expect("[ERROR] Failed to get work dir");
+
+    let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
+        container_name,
+        status: crate::engine::runtime::options::ContainerStatus::Active,
+        layout_name: opts.layout_name.clone(),
+        ip_address: assigned_ip,
+        workdir: PathBuf::from(cwd),
+        pid: child_pid.as_raw().cast_unsigned(),
+    };
+
+    fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+
     network_manager
         .attach_container(container_id.as_str(), child_pid.as_raw().cast_unsigned(), assigned_ip)
         .await
         .map_err(|e| e.to_string())?;
     
-    if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid).await {
+    if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
 
@@ -196,8 +442,14 @@ pub async fn run_container(opts: crate::engine::runtime::options::ContainerOptio
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    fs::remove_dir_all(&container_workdir)
-        .map_err(|e| format!("[WARN] Failed to delete container workdir: {}", e))?;
+    runtime_config.status = crate::engine::runtime::options::ContainerStatus::Stopped;
+
+    fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+
+    if opts.rm {
+        fs::remove_dir_all(&container_workdir)
+            .map_err(|e| format!("[WARN] Failed to delete container workdir: {}", e))?;
+    }
 
     println!("[HOST] Container stopped");
 
