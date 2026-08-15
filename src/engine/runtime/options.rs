@@ -24,6 +24,7 @@ pub struct ContainerReady {
 pub enum ContainerStatus {
     Active,
     Stopped,
+    Exited,
 }
 
 impl std::fmt::Display for ContainerStatus {

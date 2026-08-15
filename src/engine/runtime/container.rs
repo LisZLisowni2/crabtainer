@@ -9,15 +9,12 @@ use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
 use std::fs;
-use std::fs::File;
+use std::io::Write;
 use std::net::Ipv4Addr;
-use std::os::fd::AsFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use nix::fcntl::OFlag;
-use nix::libc::open;
 use nix::sys::stat::Mode;
-use serde_json::json;
 use crate::engine::runtime::options::ContainerOptions;
 
 pub fn generate_container_id() -> String {
@@ -80,9 +77,6 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
     let runtime_path = RustockerPaths::runtime_dir().join(&container_id);
     fs::create_dir_all(&runtime_path)?;
 
-    let mut container_pid: Option<nix::unistd::Pid> = None;
-    let container_id_clone = container_id.clone();
-
     tokio::task::spawn_blocking(move || {
         match unsafe { fork() }.expect("[HOST] Failed to fork") {
             ForkResult::Parent { child } => {
@@ -93,43 +87,47 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
             ForkResult::Child => {
                 setsid().expect("[HOST] Failed to setsid");
 
-                let stdout = std::io::stdout();
-                let stderr = std::io::stderr();
+                let mut stdout = std::io::stdout();
+                let mut stderr = std::io::stderr();
                 let stdin = std::io::stdin();
 
-                let saved_stdout = stdout.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stdout");
-                let saved_stderr = stderr.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stderr");
-                let saved_stdin = stdin.as_fd().try_clone_to_owned().expect("[ERROR] Failed to save stdin");
+                let saved_stdout = nix::unistd::dup(&stdout).unwrap();
+                let saved_stderr = nix::unistd::dup(&stderr).unwrap();
+                let saved_stdin = nix::unistd::dup(&stdin).unwrap();
 
                 let log_fd = nix::fcntl::open(
                     runtime_path.join("container.log").as_path(),
-                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_APPEND,
                     Mode::from_bits_truncate(644)
                 ).expect("[HOST] Failed to open container.log");
 
                 let error_fd = nix::fcntl::open(
                     runtime_path.join("error.log").as_path(),
-                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_APPEND,
                     Mode::from_bits_truncate(644)
                 ).expect("[HOST] Failed to open error.log");
 
                 let dev_null = nix::fcntl::open(
                     PathBuf::from("/dev/null").as_path(),
-                    OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_APPEND,
+                    OFlag::O_RDONLY,
                     Mode::empty(),
                 ).expect("[HOST] Failed to open /dev/null");
 
-                dup2_stdin(&dev_null).unwrap();
-                dup2_stdout(&log_fd).unwrap();
-                dup2_stderr(&error_fd).unwrap();
+                dup2_stdin(&dev_null).expect("[HOST] Failed to dup2 stdin");
+                dup2_stdout(&log_fd).expect("[HOST] Failed to dup2 stdout");
+                dup2_stderr(&error_fd).expect("[HOST] Failed to dup2 stderr");
 
                 const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
                 let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
                 if !layout_dir.exists() {
+                    stderr.write(format!(
+                        "Layout '{}' doesn't exist! Build it first using 'rustocker build'.\n",
+                        opts.layout_name
+                    ).as_bytes()).expect("[HOST] Failed to write to error");
                     return Err(format!(
                         "Layout '{}' doesn't exist! Build it first using 'rustocker build'.",
                         opts.layout_name
-                    ));
+                    ))
                 }
                 let layout_rootfs = layout_dir.join("rootfs");
 
@@ -160,7 +158,7 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
 
                 let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
-                println!("[IPAM] Assigned IP for container {}: {}", &container_id, assigned_ip);
+                stdout.write(format!("[IPAM] Assigned IP for container {}: {}\n", &container_id, assigned_ip).as_bytes()).unwrap();
 
                 let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
 
@@ -179,8 +177,6 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     work_dir.to_str().unwrap()
                 );
 
-                println!("[HOST] Mount overlayfs");
-
                 mount(
                     Some("overlay"),
                     &merged_rootfs,
@@ -190,7 +186,7 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                 )
                     .expect("[ERROR] Failed to mount overlayfs");
 
-                println!("[HOST] Starting container {}", container_id);
+                stdout.write(format!("[HOST] Starting container {}\n", container_id).as_bytes()).unwrap();
 
                 let final_opts = crate::engine::runtime::options::ContainerReady {
                     layout_name: opts.layout_name.clone(),
@@ -211,9 +207,11 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     CloneFlags::CLONE_NEWNS |
                     CloneFlags::CLONE_NEWNET;
 
+                let (read_fd, write_fd) = nix::unistd::pipe().expect("[HOST] Failed to create pipe");
+
                 let child_pid = unsafe {
                     clone(
-                        Box::new(|| child_process(&merged_rootfs, &container_id, &final_opts)),
+                        Box::new(|| detach_child_process(&merged_rootfs, &container_id, &final_opts, read_fd.as_raw_fd())),
                         &mut stack[..],
                         flags,
                         Some(Signal::SIGCHLD as i32),
@@ -242,33 +240,25 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                 };
 
                 fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
-                container_pid = Some(child_pid);
 
                 if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
                     eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
                 };
 
-                nix::unistd::close(dev_null).expect("[ERROR] Failed to close dev_null fd");
-                nix::unistd::close(log_fd).expect("[ERROR] Failed to close log_fd");
-                nix::unistd::close(error_fd).expect("[ERROR] Failed to close error_fd");
+                let _ = network_manager
+                    .attach_container(container_id.as_str(), child_pid.as_raw().cast_unsigned(), assigned_ip);
 
-                dup2_stdin(saved_stdin).expect("[ERROR] Failed to dup2 stdin");
-                dup2_stderr(saved_stderr).expect("[ERROR] Failed to dup2 stderr");
-                dup2_stdout(saved_stdout).expect("[ERROR] Failed to dup2 stdout");
+                let _ = nix::unistd::write(write_fd, b"1");
+
+                dup2_stdout(&saved_stdout).expect("[ERROR] Failed to restore stdout");
+                dup2_stderr(&saved_stderr).expect("[ERROR] Failed to restore stderr");
+                dup2_stdin(&saved_stdin).expect("[ERROR] Failed to restore stdin");
             }
         };
 
         Ok(())
     })
         .await??;
-
-    if let Some(pid) = container_pid {
-        network_manager
-            .attach_container(container_id_clone.as_str(), pid.as_raw().cast_unsigned(), assigned_ip)
-            .await
-            .map_err(|e| e.to_string())
-            .expect("[ERROR] Failed to attach container to network");
-    }
 
     Ok(())
 }
@@ -454,6 +444,18 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     println!("[HOST] Container stopped");
 
     Ok(())
+}
+
+fn detach_child_process(rootfs: &Path, container_id: &String, options: &crate::engine::runtime::options::ContainerReady, sync_raw_fd: std::os::fd::RawFd) -> isize {
+    let mut buf = [0u8; 1];
+    let sync_read_fd = unsafe { OwnedFd::from_raw_fd(sync_raw_fd) };
+
+    if let Err(e) = nix::unistd::read(&sync_read_fd, &mut buf) {
+        eprintln!("[child] Failed sync pipe read (errno {}): {}", e, container_id);
+        std::process::exit(1);
+    }
+
+    child_process(rootfs, container_id, options)
 }
 
 fn child_process(rootfs: &Path, container_id: &String, options: &crate::engine::runtime::options::ContainerReady) -> isize {

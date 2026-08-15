@@ -1,7 +1,10 @@
+use std::os::fd::{AsFd, AsRawFd};
 use clap::{Parser, Subcommand};
+use nix::sched::CloneFlags;
 use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
 use rustocker::engine::runtime::options::{ContainerOptions, RuntimeConfig};
+use rustocker::engine::support::paths::RustockerPaths;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -49,6 +52,21 @@ enum Commands {
         tag: String,
     },
     Ps,
+    Stop {
+        name: String,
+    },
+    Rm {
+        name: String,
+    },
+    Exec {
+        name: String,
+
+        #[arg(short, long, default_value_t = false)]
+        interactive: bool,
+
+        #[arg(short, long, default_value_t = false)]
+        tty: bool,
+    },
     Images,
     Layouts,
 }
@@ -140,7 +158,7 @@ async fn main() {
             }
         }
         Commands::Ps => {
-            let container_dir = rustocker::engine::support::paths::RustockerPaths::runtime_dir();
+            let container_dir = RustockerPaths::runtime_dir();
             println!("{:<15} {:<20} {:<20} {:<15}", "ID", "NAME", "LAYOUT", "STATUS");
             println!("{}", "-".repeat(80));
             if let Ok(entries) = std::fs::read_dir(container_dir) {
@@ -151,13 +169,41 @@ async fn main() {
                         .unwrap()
                         .to_str()
                         .unwrap();
-                    
-                    let runtime_config_path = path.join("config.json");
-                    let data: RuntimeConfig = serde_json::from_str(
-                        std::fs::read_to_string(runtime_config_path).unwrap().as_str()
-                    ).expect("Error reading runtime config");
 
-                    println!("{:<15} {:<20} {:<20} {:<15}", id, data.container_name, data.layout_name, data.status);
+                    let runtime_config_path = path.join("config.json");
+                    if let Ok(file) = std::fs::read_to_string(runtime_config_path) {
+                        match serde_json::from_str::<RuntimeConfig>(file.as_str()) {
+                            Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", id),
+                            Ok(data) => println!("{:<15} {:<20} {:<20} {:<15}", id, data.container_name, data.layout_name, data.status),
+                        }
+                    } else {
+                        eprintln!("[WARN] Failed to retrieve data for {}", id);
+                    }
+                }
+            }
+        }
+        Commands::Stop { name } => {
+
+        }
+        Commands::Rm { name } => {
+
+        }
+        Commands::Exec { name, interactive, tty } => {
+            let runtime_dir = RustockerPaths::runtime_dir();
+
+            let namespaces = [
+                ("ipc", CloneFlags::CLONE_NEWIPC),
+                ("uts", CloneFlags::CLONE_NEWUTS),
+                ("net", CloneFlags::CLONE_NEWNET),
+                ("pid", CloneFlags::CLONE_NEWPID),
+                ("mnt", CloneFlags::CLONE_NEWNS),
+            ];
+
+            for (ns_name, flag) in namespaces {
+                let target_pid = 122842; // temporary
+                let ns_path = format!("/proc/{}/ns/{}", target_pid, ns_name);
+                if let Ok(file) = std::fs::File::open(&ns_path) {
+                    nix::sched::setns(file.as_fd(), flag).unwrap();
                 }
             }
         }
