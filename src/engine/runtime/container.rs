@@ -1,10 +1,15 @@
 use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
-use crate::engine::support::paths::RustockerPaths;
 use crate::engine::runtime::network::{Ipam, NetworkManager};
+use crate::engine::runtime::options::ContainerOptions;
+use crate::engine::support::paths::RustockerPaths;
+use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
-use nix::unistd::{chdir, execvp, fork, sethostname, setsid, ForkResult, dup2_stdin, dup2_stdout, dup2_stderr};
+use nix::sys::stat::Mode;
+use nix::unistd::{
+    ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, sethostname, setsid,
+};
 use oci_spec::runtime::Spec;
 use rand::RngExt;
 use std::ffi::CString;
@@ -13,9 +18,6 @@ use std::io::Write;
 use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
-use nix::fcntl::OFlag;
-use nix::sys::stat::Mode;
-use crate::engine::runtime::options::ContainerOptions;
 
 pub fn generate_container_id() -> String {
     let mut rng = rand::rng();
@@ -41,10 +43,7 @@ pub fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>)
     }
 }
 
-pub fn resolve_memory_limit(
-    memory_limit: &Option<f64>,
-    layout_memory_limit: Option<i64>,
-) -> i64 {
+pub fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
     if let Some(memory) = memory_limit {
         *memory as i64
     } else {
@@ -52,27 +51,31 @@ pub fn resolve_memory_limit(
     }
 }
 
-pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn spawn_detach_container(
+    opts: ContainerOptions,
+    container_id: String,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("[HOST] Spawning container {}...", container_id);
 
     let bridge_name = "rustocker0";
     let subnet_mask = "172.19.0.1/16";
-    let network_manager = NetworkManager::new(
-        bridge_name.to_string(),
-        Ipv4Addr::new(172, 19, 0, 1),
-        16
-    ).await
+    let network_manager =
+        NetworkManager::new(bridge_name.to_string(), Ipv4Addr::new(172, 19, 0, 1), 16)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let ipam = Ipam::new(subnet_mask, RustockerPaths::base_dir().join("ipam.json"))
         .map_err(|e| e.to_string())?;
 
-    let ipam = Ipam::new(
-        subnet_mask,
-        RustockerPaths::base_dir().join("ipam.json")
-    ).map_err(|e| e.to_string())?;
-
-    network_manager.init_global_network().await
+    network_manager
+        .init_global_network()
+        .await
         .map_err(|e| e.to_string())?;
 
-    let assigned_ip = ipam.allocate(&container_id).await.map_err(|e| e.to_string())?;
+    let assigned_ip = ipam
+        .allocate(&container_id)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let runtime_path = RustockerPaths::runtime_dir().join(&container_id);
     fs::create_dir_all(&runtime_path)?;
@@ -98,20 +101,23 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                 let log_fd = nix::fcntl::open(
                     runtime_path.join("container.log").as_path(),
                     OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_APPEND,
-                    Mode::from_bits_truncate(644)
-                ).expect("[HOST] Failed to open container.log");
+                    Mode::from_bits_truncate(644),
+                )
+                .expect("[HOST] Failed to open container.log");
 
                 let error_fd = nix::fcntl::open(
                     runtime_path.join("error.log").as_path(),
                     OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_APPEND,
-                    Mode::from_bits_truncate(644)
-                ).expect("[HOST] Failed to open error.log");
+                    Mode::from_bits_truncate(644),
+                )
+                .expect("[HOST] Failed to open error.log");
 
                 let dev_null = nix::fcntl::open(
                     PathBuf::from("/dev/null").as_path(),
                     OFlag::O_RDONLY,
                     Mode::empty(),
-                ).expect("[HOST] Failed to open /dev/null");
+                )
+                .expect("[HOST] Failed to open /dev/null");
 
                 dup2_stdin(&dev_null).expect("[HOST] Failed to dup2 stdin");
                 dup2_stdout(&log_fd).expect("[HOST] Failed to dup2 stdout");
@@ -127,11 +133,12 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     return Err(format!(
                         "Layout '{}' doesn't exist! Build it first using 'rustocker build'.",
                         opts.layout_name
-                    ))
+                    ));
                 }
                 let layout_rootfs = layout_dir.join("rootfs");
 
-                let layout_opts: oci_spec::runtime::Spec = Spec::load(layout_dir.join("config.json")).unwrap();
+                let layout_opts: oci_spec::runtime::Spec =
+                    Spec::load(layout_dir.join("config.json")).unwrap();
 
                 let default_args = layout_opts
                     .process()
@@ -158,7 +165,15 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
 
                 let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
-                stdout.write(format!("[IPAM] Assigned IP for container {}: {}\n", &container_id, assigned_ip).as_bytes()).unwrap();
+                stdout
+                    .write(
+                        format!(
+                            "[IPAM] Assigned IP for container {}: {}\n",
+                            &container_id, assigned_ip
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
 
                 let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
 
@@ -166,9 +181,12 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                 let work_dir = container_workdir.join("work");
                 let merged_rootfs = container_workdir.join("rootfs");
 
-                fs::create_dir_all(&upper_dir).map_err(|e| format!("Upperdir failed to create: {}", e))?;
-                fs::create_dir_all(&work_dir).map_err(|e| format!("Workdir failed to create: {}", e))?;
-                fs::create_dir_all(&merged_rootfs).map_err(|e| format!("Rootfs failed to create: {}", e))?;
+                fs::create_dir_all(&upper_dir)
+                    .map_err(|e| format!("Upperdir failed to create: {}", e))?;
+                fs::create_dir_all(&work_dir)
+                    .map_err(|e| format!("Workdir failed to create: {}", e))?;
+                fs::create_dir_all(&merged_rootfs)
+                    .map_err(|e| format!("Rootfs failed to create: {}", e))?;
 
                 let overlay_opts = format!(
                     "lowerdir={},upperdir={},workdir={}",
@@ -184,9 +202,11 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     MsFlags::empty(),
                     Some(overlay_opts.as_str()),
                 )
-                    .expect("[ERROR] Failed to mount overlayfs");
+                .expect("[ERROR] Failed to mount overlayfs");
 
-                stdout.write(format!("[HOST] Starting container {}\n", container_id).as_bytes()).unwrap();
+                stdout
+                    .write(format!("[HOST] Starting container {}\n", container_id).as_bytes())
+                    .unwrap();
 
                 let final_opts = crate::engine::runtime::options::ContainerReady {
                     layout_name: opts.layout_name.clone(),
@@ -202,21 +222,29 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
 
                 let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
 
-                let flags = CloneFlags::CLONE_NEWUTS |
-                    CloneFlags::CLONE_NEWPID |
-                    CloneFlags::CLONE_NEWNS |
-                    CloneFlags::CLONE_NEWNET;
+                let flags = CloneFlags::CLONE_NEWUTS
+                    | CloneFlags::CLONE_NEWPID
+                    | CloneFlags::CLONE_NEWNS
+                    | CloneFlags::CLONE_NEWNET;
 
-                let (read_fd, write_fd) = nix::unistd::pipe().expect("[HOST] Failed to create pipe");
+                let (read_fd, write_fd) =
+                    nix::unistd::pipe().expect("[HOST] Failed to create pipe");
 
                 let child_pid = unsafe {
                     clone(
-                        Box::new(|| detach_child_process(&merged_rootfs, &container_id, &final_opts, read_fd.as_raw_fd())),
+                        Box::new(|| {
+                            detach_child_process(
+                                &merged_rootfs,
+                                &container_id,
+                                &final_opts,
+                                read_fd.as_raw_fd(),
+                            )
+                        }),
                         &mut stack[..],
                         flags,
                         Some(Signal::SIGCHLD as i32),
                     )
-                        .expect("[ERROR] Failed to spawn child.")
+                    .expect("[ERROR] Failed to spawn child.")
                 };
 
                 let container_name = if let Some(name) = &opts.container_name {
@@ -230,7 +258,7 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     .and_then(|p| p.cwd().to_str())
                     .expect("[ERROR] Failed to get work dir");
 
-                let runtime_config = crate::engine::runtime::options::RuntimeConfig {
+                let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
                     container_name,
                     status: crate::engine::runtime::options::ContainerStatus::Active,
                     layout_name: opts.layout_name.clone(),
@@ -239,26 +267,70 @@ pub async fn spawn_detach_container(opts: ContainerOptions, container_id: String
                     pid: child_pid.as_raw().cast_unsigned(),
                 };
 
-                fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+                fs::write(
+                    container_workdir.join("config.json"),
+                    serde_json::to_string_pretty(&runtime_config)
+                        .unwrap()
+                        .into_bytes(),
+                )
+                .unwrap();
 
                 if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
                     eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
                 };
 
-                let _ = network_manager
-                    .attach_container(container_id.as_str(), child_pid.as_raw().cast_unsigned(), assigned_ip);
-
                 let _ = nix::unistd::write(write_fd, b"1");
+
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("[ERROR] Failed to create tokio runtime");
+
+                rt.block_on(async {
+                    let (conn, handle, _) = rtnetlink::new_connection().unwrap();
+                    let conn_handle = tokio::spawn(conn);
+
+                    let setup_res = network_manager
+                        .attach_container_with_custom_handle(
+                            container_id.as_str(),
+                            child_pid.as_raw().cast_unsigned(),
+                            assigned_ip,
+                            handle
+                        )
+                        .await;
+
+                    conn_handle.abort();
+
+                    if let Err(e) = setup_res {
+                        eprintln!("[WARN] Failed to attach container: {}", e);
+                    }
+                });
 
                 dup2_stdout(&saved_stdout).expect("[ERROR] Failed to restore stdout");
                 dup2_stderr(&saved_stderr).expect("[ERROR] Failed to restore stderr");
                 dup2_stdin(&saved_stdin).expect("[ERROR] Failed to restore stdin");
+
+                tokio::task::spawn_blocking(move || {
+                    if let Err(e) = nix::sys::wait::waitpid(child_pid, None) {
+                        eprintln!("[WARN] Failed to wait for child process: {}", e);
+                    } else {
+                        runtime_config.status =
+                            crate::engine::runtime::options::ContainerStatus::Stopped;
+                        fs::write(
+                            container_workdir.join("config.json"),
+                            serde_json::to_string_pretty(&runtime_config)
+                                .unwrap()
+                                .into_bytes(),
+                        )
+                        .unwrap();
+                    }
+                });
             }
         };
 
         Ok(())
     })
-        .await??;
+    .await??;
 
     Ok(())
 }
@@ -268,19 +340,17 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     println!("[HOST] Running a container...");
     let bridge_name = "rustocker0";
     let subnet_mask = "172.19.0.0/16";
-    let network_manager = NetworkManager::new(
-        bridge_name.to_string(),
-        Ipv4Addr::new(172, 19, 0, 1),
-        16
-    ).await
+    let network_manager =
+        NetworkManager::new(bridge_name.to_string(), Ipv4Addr::new(172, 19, 0, 1), 16)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let ipam = Ipam::new(subnet_mask, RustockerPaths::base_dir().join("ipam.json"))
         .map_err(|e| e.to_string())?;
 
-    let ipam = Ipam::new(
-        subnet_mask,
-        RustockerPaths::base_dir().join("ipam.json")
-    ).map_err(|e| e.to_string())?;
-
-    network_manager.init_global_network().await
+    network_manager
+        .init_global_network()
+        .await
         .map_err(|e| e.to_string())?;
 
     let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
@@ -319,9 +389,15 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
-    let assigned_ip = ipam.allocate(&container_id).await.map_err(|e| e.to_string())?;
+    let assigned_ip = ipam
+        .allocate(&container_id)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    println!("[IPAM] Assigned IP for container {}: {}", &container_id, assigned_ip);
+    println!(
+        "[IPAM] Assigned IP for container {}: {}",
+        &container_id, assigned_ip
+    );
 
     let container_workdir = RustockerPaths::runtime_dir().join(&container_id);
 
@@ -367,10 +443,10 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let mut stack: Vec<u8> = vec![0u8; STACK_SIZE];
 
-    let flags = CloneFlags::CLONE_NEWUTS |
-            CloneFlags::CLONE_NEWPID |
-            CloneFlags::CLONE_NEWNS |
-            CloneFlags::CLONE_NEWNET;
+    let flags = CloneFlags::CLONE_NEWUTS
+        | CloneFlags::CLONE_NEWPID
+        | CloneFlags::CLONE_NEWNS
+        | CloneFlags::CLONE_NEWNET;
 
     let child_pid = unsafe {
         clone(
@@ -402,13 +478,23 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         pid: child_pid.as_raw().cast_unsigned(),
     };
 
-    fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+    fs::write(
+        container_workdir.join("config.json"),
+        serde_json::to_string_pretty(&runtime_config)
+            .unwrap()
+            .into_bytes(),
+    )
+    .unwrap();
 
     network_manager
-        .attach_container(container_id.as_str(), child_pid.as_raw().cast_unsigned(), assigned_ip)
+        .attach_container(
+            container_id.as_str(),
+            child_pid.as_raw().cast_unsigned(),
+            assigned_ip,
+        )
         .await
         .map_err(|e| e.to_string())?;
-    
+
     if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
@@ -419,8 +505,14 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     .await
     .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
 
-    let released_ip = ipam.release(&container_id).await.map_err(|e| e.to_string())?;
-    println!("[IPAM] Released IP for container {}: {}", &container_id, released_ip);
+    let released_ip = ipam
+        .release(&container_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!(
+        "[IPAM] Released IP for container {}: {}",
+        &container_id, released_ip
+    );
 
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
@@ -434,7 +526,13 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     runtime_config.status = crate::engine::runtime::options::ContainerStatus::Stopped;
 
-    fs::write(container_workdir.join("config.json"), serde_json::to_string_pretty(&runtime_config).unwrap().into_bytes()).unwrap();
+    fs::write(
+        container_workdir.join("config.json"),
+        serde_json::to_string_pretty(&runtime_config)
+            .unwrap()
+            .into_bytes(),
+    )
+    .unwrap();
 
     if opts.rm {
         fs::remove_dir_all(&container_workdir)
@@ -446,19 +544,31 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     Ok(())
 }
 
-fn detach_child_process(rootfs: &Path, container_id: &String, options: &crate::engine::runtime::options::ContainerReady, sync_raw_fd: std::os::fd::RawFd) -> isize {
+fn detach_child_process(
+    rootfs: &Path,
+    container_id: &String,
+    options: &crate::engine::runtime::options::ContainerReady,
+    sync_raw_fd: std::os::fd::RawFd,
+) -> isize {
     let mut buf = [0u8; 1];
     let sync_read_fd = unsafe { OwnedFd::from_raw_fd(sync_raw_fd) };
 
     if let Err(e) = nix::unistd::read(&sync_read_fd, &mut buf) {
-        eprintln!("[child] Failed sync pipe read (errno {}): {}", e, container_id);
+        eprintln!(
+            "[child] Failed sync pipe read (errno {}): {}",
+            e, container_id
+        );
         std::process::exit(1);
     }
 
     child_process(rootfs, container_id, options)
 }
 
-fn child_process(rootfs: &Path, container_id: &String, options: &crate::engine::runtime::options::ContainerReady) -> isize {
+fn child_process(
+    rootfs: &Path,
+    container_id: &String,
+    options: &crate::engine::runtime::options::ContainerReady,
+) -> isize {
     sethostname(container_id).ok();
 
     if let Err(e) = mount(
@@ -554,7 +664,10 @@ mod tests {
     fn generate_container_ids_are_unique() {
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
-            assert!(seen.insert(generate_container_id()), "duplicate container id");
+            assert!(
+                seen.insert(generate_container_id()),
+                "duplicate container id"
+            );
         }
         assert_eq!(seen.len(), 1000);
     }

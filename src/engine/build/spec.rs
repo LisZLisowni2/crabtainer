@@ -117,13 +117,7 @@ mod tests {
             .unwrap();
 
         let spec = Spec::load(dir.path().join("config.json")).unwrap();
-        let resources = spec
-            .linux()
-            .as_ref()
-            .unwrap()
-            .resources()
-            .as_ref()
-            .unwrap();
+        let resources = spec.linux().as_ref().unwrap().resources().as_ref().unwrap();
 
         assert_eq!(resources.cpu().as_ref().unwrap().quota(), Some(150000));
         assert_eq!(resources.cpu().as_ref().unwrap().period(), Some(100000));
@@ -151,17 +145,19 @@ mod tests {
         save_config(opts, dir.path().to_path_buf()).await.unwrap();
 
         let spec = Spec::load(dir.path().join("config.json")).unwrap();
-        let resources = spec
-            .linux()
-            .as_ref()
-            .unwrap()
-            .resources()
-            .as_ref()
-            .unwrap();
+        let resources = spec.linux().as_ref().unwrap().resources().as_ref().unwrap();
 
         assert_eq!(resources.cpu().as_ref().unwrap().quota(), Some(100000));
         assert_eq!(resources.cpu().as_ref().unwrap().period(), Some(100000));
         assert_eq!(resources.memory().as_ref().unwrap().limit(), Some(i64::MAX));
-        assert!(spec.process().as_ref().unwrap().args().as_ref().unwrap().is_empty());
+        assert!(
+            spec.process()
+                .as_ref()
+                .unwrap()
+                .args()
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
     }
 }

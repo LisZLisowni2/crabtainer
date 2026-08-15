@@ -1,10 +1,11 @@
-use std::os::fd::{AsFd, AsRawFd};
 use clap::{Parser, Subcommand};
 use nix::sched::CloneFlags;
 use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
 use rustocker::engine::runtime::options::{ContainerOptions, RuntimeConfig};
 use rustocker::engine::support::paths::RustockerPaths;
+use std::os::fd::{AsFd, AsRawFd};
+use std::ptr::null;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -21,7 +22,7 @@ enum Commands {
 
         #[arg(short, long, default_value_t = false)]
         detach: bool,
-        
+
         #[arg(long, default_value_t = false)]
         rm: bool,
 
@@ -53,13 +54,13 @@ enum Commands {
     },
     Ps,
     Stop {
-        name: String,
+        id: String,
     },
     Rm {
-        name: String,
+        id: String,
     },
     Exec {
-        name: String,
+        id: String,
 
         #[arg(short, long, default_value_t = false)]
         interactive: bool,
@@ -106,11 +107,11 @@ async fn main() {
                 cpu_limit,
                 memory_limit,
                 container_name: name,
-                rm
+                rm,
             };
 
             let container_id = rustocker::engine::runtime::container::generate_container_id();
-            
+
             if !detach {
                 run_container(options, container_id).await.unwrap();
             } else {
@@ -159,22 +160,24 @@ async fn main() {
         }
         Commands::Ps => {
             let container_dir = RustockerPaths::runtime_dir();
-            println!("{:<15} {:<20} {:<20} {:<15}", "ID", "NAME", "LAYOUT", "STATUS");
+            println!(
+                "{:<15} {:<20} {:<20} {:<15}",
+                "ID", "NAME", "LAYOUT", "STATUS"
+            );
             println!("{}", "-".repeat(80));
             if let Ok(entries) = std::fs::read_dir(container_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    let id = path
-                        .file_stem()
-                        .unwrap()
-                        .to_str()
-                        .unwrap();
+                    let id = path.file_stem().unwrap().to_str().unwrap();
 
                     let runtime_config_path = path.join("config.json");
-                    if let Ok(file) = std::fs::read_to_string(runtime_config_path) {
-                        match serde_json::from_str::<RuntimeConfig>(file.as_str()) {
+                    if let Ok(content) = std::fs::read_to_string(runtime_config_path) {
+                        match serde_json::from_str::<RuntimeConfig>(content.as_str()) {
                             Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", id),
-                            Ok(data) => println!("{:<15} {:<20} {:<20} {:<15}", id, data.container_name, data.layout_name, data.status),
+                            Ok(data) => println!(
+                                "{:<15} {:<20} {:<20} {:<15}",
+                                id, data.container_name, data.layout_name, data.status
+                            ),
                         }
                     } else {
                         eprintln!("[WARN] Failed to retrieve data for {}", id);
@@ -182,14 +185,18 @@ async fn main() {
                 }
             }
         }
-        Commands::Stop { name } => {
-
+        Commands::Stop { id } => {
+            let runtime_dir = RustockerPaths::runtime_dir().join(id);
         }
-        Commands::Rm { name } => {
-
+        Commands::Rm { id } => {
+            let runtime_dir = RustockerPaths::runtime_dir().join(id);
         }
-        Commands::Exec { name, interactive, tty } => {
-            let runtime_dir = RustockerPaths::runtime_dir();
+        Commands::Exec {
+            id,
+            interactive,
+            tty,
+        } => {
+            let runtime_dir = RustockerPaths::runtime_dir().join(&id);
 
             let namespaces = [
                 ("ipc", CloneFlags::CLONE_NEWIPC),
@@ -199,11 +206,23 @@ async fn main() {
                 ("mnt", CloneFlags::CLONE_NEWNS),
             ];
 
-            for (ns_name, flag) in namespaces {
-                let target_pid = 122842; // temporary
-                let ns_path = format!("/proc/{}/ns/{}", target_pid, ns_name);
-                if let Ok(file) = std::fs::File::open(&ns_path) {
-                    nix::sched::setns(file.as_fd(), flag).unwrap();
+            let mut target_pid: u32 = 0;
+
+            if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
+                match serde_json::from_str::<RuntimeConfig>(content.as_str()) {
+                    Ok(config) => {
+                        target_pid = config.pid;
+                    }
+                    Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", &id),
+                }
+            }
+
+            if target_pid > 0 {
+                for (ns_name, flag) in namespaces {
+                    let ns_path = format!("/proc/{}/ns/{}", target_pid, ns_name);
+                    if let Ok(file) = std::fs::File::open(&ns_path) {
+                        nix::sched::setns(file.as_fd(), flag).unwrap();
+                    }
                 }
             }
         }
@@ -222,7 +241,19 @@ mod tests {
 
     #[test]
     fn run_parses_all_parameters() {
-        match parse_run(&["my-layout", "-n", "MyContainer", "--rm", "-d", "-C", "1.5", "-M", "2048", "-c", "/bin/sh"]) {
+        match parse_run(&[
+            "my-layout",
+            "-n",
+            "MyContainer",
+            "--rm",
+            "-d",
+            "-C",
+            "1.5",
+            "-M",
+            "2048",
+            "-c",
+            "/bin/sh",
+        ]) {
             Commands::Run {
                 layout,
                 cpu_limit,
@@ -231,7 +262,7 @@ mod tests {
                 args,
                 name,
                 detach,
-                rm
+                rm,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -257,7 +288,7 @@ mod tests {
                 name,
                 args,
                 detach,
-                rm
+                rm,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);

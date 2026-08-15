@@ -1,21 +1,24 @@
+use futures::stream::TryStreamExt;
+use ipnet::Ipv4Net;
+use rtnetlink::{
+    Handle, LinkBridge, LinkMessageBuilder, LinkUnspec, LinkVeth, RouteMessageBuilder,
+    new_connection,
+};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use rtnetlink::{new_connection, Handle, LinkVeth, LinkBridge, LinkMessageBuilder, LinkUnspec, RouteMessageBuilder};
-use futures::stream::TryStreamExt;
-use ipnet::Ipv4Net;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 pub struct NetworkManager {
     handle: Handle,
     bridge_name: String,
     gateway_ip: Ipv4Addr,
-    subnet_prefix: u8
+    subnet_prefix: u8,
 }
 
 #[derive(Error, Debug)]
@@ -29,7 +32,7 @@ pub enum IpamError {
     #[error("IO Error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error)
+    SerializationError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,7 +44,7 @@ pub struct IpamState {
 
 pub struct Ipam {
     db_path: PathBuf,
-    state: Arc<Mutex<IpamState>>
+    state: Arc<Mutex<IpamState>>,
 }
 
 impl Ipam {
@@ -54,9 +57,9 @@ impl Ipam {
             file.read_to_string(&mut contents)?;
             serde_json::from_str(&contents)?
         } else {
-            let subnet: Ipv4Net = subnet_cidr.parse().map_err(|_|
+            let subnet: Ipv4Net = subnet_cidr.parse().map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid CIDR block")
-            )?;
+            })?;
 
             let mut hosts = subnet.hosts();
             let gateway = hosts.next().ok_or(IpamError::SubnetExhausted)?;
@@ -64,7 +67,7 @@ impl Ipam {
             let new_state = IpamState {
                 subnet,
                 gateway,
-                allocations: HashMap::new()
+                allocations: HashMap::new(),
             };
 
             let ipam = Self {
@@ -81,7 +84,7 @@ impl Ipam {
 
         Ok(Self {
             db_path: path,
-            state: Arc::new(Mutex::new(state))
+            state: Arc::new(Mutex::new(state)),
         })
     }
 
@@ -104,7 +107,7 @@ impl Ipam {
             return Ok(ip);
         }
 
-        let allocated_set : std::collections::HashSet<Ipv4Addr> =
+        let allocated_set: std::collections::HashSet<Ipv4Addr> =
             state.allocations.values().copied().collect();
 
         let _gateway = state.gateway;
@@ -157,7 +160,11 @@ impl Ipam {
 }
 
 impl NetworkManager {
-    pub async fn new(bridge_name: String, gateway_ip: Ipv4Addr, subnet_prefix: u8) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        bridge_name: String,
+        gateway_ip: Ipv4Addr,
+        subnet_prefix: u8,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (connection, handle, _) = new_connection()?;
         tokio::spawn(connection);
 
@@ -165,7 +172,7 @@ impl NetworkManager {
             handle,
             bridge_name,
             gateway_ip,
-            subnet_prefix
+            subnet_prefix,
         })
     }
 
@@ -188,7 +195,11 @@ impl NetworkManager {
 
         self.handle
             .address()
-            .add(bridge_idx, std::net::IpAddr::V4(self.gateway_ip), self.subnet_prefix)
+            .add(
+                bridge_idx,
+                std::net::IpAddr::V4(self.gateway_ip),
+                self.subnet_prefix,
+            )
             .execute()
             .await?;
 
@@ -196,20 +207,31 @@ impl NetworkManager {
 
         self.handle
             .link()
-            .set(LinkMessageBuilder::<LinkUnspec>::default()
-                .index(bridge_idx)
-                .up()
-                .build()
-            ).execute().await?;
+            .set(
+                LinkMessageBuilder::<LinkUnspec>::default()
+                    .index(bridge_idx)
+                    .up()
+                    .build(),
+            )
+            .execute()
+            .await?;
         println!("[NETWORK] Set UP bridge: {}", self.bridge_name);
 
         println!("[NETWORK] Setting iptables rules");
-        self.add_iptables_rules(self.bridge_name.as_str(), format!("{}/{}", self.gateway_ip, self.subnet_prefix).as_str()).await?;
+        self.add_iptables_rules(
+            self.bridge_name.as_str(),
+            format!("{}/{}", self.gateway_ip, self.subnet_prefix).as_str(),
+        )
+        .await?;
 
         Ok(())
     }
 
-    pub async fn add_iptables_rules(&self, bridge_name: &str, subnet_mask: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn add_iptables_rules(
+        &self,
+        bridge_name: &str,
+        subnet_mask: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let ipt = iptables::new(false)?;
 
         if !ipt.chain_exists("filter", "RUSTOCKER")? {
@@ -227,7 +249,10 @@ impl NetworkManager {
         let forward_rule = format!("-s {} ! -o {} -j ACCEPT", subnet_mask, bridge_name);
         if !ipt.exists("filter", "RUSTOCKER", &forward_rule)? {
             ipt.append("filter", "RUSTOCKER", &forward_rule)?;
-            println!("[IPTABLES] Allowed forwarding from {} to {}", subnet_mask, bridge_name);
+            println!(
+                "[IPTABLES] Allowed forwarding from {} to {}",
+                subnet_mask, bridge_name
+            );
         }
 
         let return_rule = format!(
@@ -247,7 +272,11 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub async fn remove_iptables_rules(&self, bridge_name: &str, subnet_mask: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn remove_iptables_rules(
+        &self,
+        bridge_name: &str,
+        subnet_mask: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let ipt = iptables::new(false)?;
         let rule = format!("-s {} -o {} -j MASQUERADE", subnet_mask, bridge_name);
 
@@ -274,19 +303,53 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub async fn attach_container(&self, container_id: &str, container_pid: u32, ip: Ipv4Addr) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn attach_container_with_custom_handle(
+        &self,
+        container_id: &str,
+        container_pid: u32,
+        ip: Ipv4Addr,
+        handle: Handle
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp_network_manager = Self {
+            gateway_ip: self.gateway_ip,
+            bridge_name: self.bridge_name.clone(),
+            subnet_prefix: self.subnet_prefix,
+            handle
+        };
+
+        if let Err(e) = temp_network_manager
+            .attach_container(container_id, container_pid, ip)
+            .await {
+            eprintln!("[NETWORK] Failed to attach container to IP address: {}", e);
+        };
+
+        Ok(())
+    }
+
+    pub async fn attach_container(
+        &self,
+        container_id: &str,
+        container_pid: u32,
+        ip: Ipv4Addr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let short_id = &container_id[..6.min(container_id.len())];
         let veth_host = format!("veth_{}", short_id);
         let veth_cont = format!("vethc_{}", short_id);
 
-        println!("[NETWORK] Creating new pair link for container {}: {} <-> {}", container_id, veth_host, veth_cont);
+        println!(
+            "[NETWORK] Creating new pair link for container {}: {} <-> {}",
+            container_id, veth_host, veth_cont
+        );
 
         self.handle
             .link()
-            .add(
-                LinkVeth::new(veth_host.as_str(), veth_cont.as_str()).build()
-            ).execute().await?;
-        println!("[NETWORK] Created pair link: {} <-> {}", veth_host, veth_cont);
+            .add(LinkVeth::new(veth_host.as_str(), veth_cont.as_str()).build())
+            .execute()
+            .await?;
+        println!(
+            "[NETWORK] Created pair link: {} <-> {}",
+            veth_host, veth_cont
+        );
 
         let bridge_id = self.get_link_index(self.bridge_name.as_str()).await?;
         let veth_host_id = self.get_link_index(veth_host.as_str()).await?;
@@ -294,11 +357,12 @@ impl NetworkManager {
 
         self.handle
             .link()
-            .set(LinkMessageBuilder::<LinkUnspec>::default()
-                .index(veth_host_id)
-                .controller(bridge_id)
-                .up()
-                .build()
+            .set(
+                LinkMessageBuilder::<LinkUnspec>::default()
+                    .index(veth_host_id)
+                    .controller(bridge_id)
+                    .up()
+                    .build(),
             )
             .execute()
             .await?;
@@ -306,10 +370,11 @@ impl NetworkManager {
 
         self.handle
             .link()
-            .set(LinkMessageBuilder::<LinkUnspec>::default()
-                .index(veth_cont_id)
-                .setns_by_pid(container_pid)
-                .build()
+            .set(
+                LinkMessageBuilder::<LinkUnspec>::default()
+                    .index(veth_cont_id)
+                    .setns_by_pid(container_pid)
+                    .build(),
             )
             .execute()
             .await?;
@@ -319,78 +384,107 @@ impl NetworkManager {
         let subnet_prefix = self.subnet_prefix;
 
         tokio::task::spawn_blocking(move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            use std::fs::File;
-            use nix::sched::{setns, CloneFlags};
+            let thread_handle = std::thread::spawn(
+                move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                    use nix::sched::{CloneFlags, setns};
+                    use std::fs::File;
 
-            let netns_path = format!("/proc/{}/ns/net", container_pid);
-            let netns_fd = File::open(&netns_path)?;
+                    let netns_path = format!("/proc/{}/ns/net", container_pid);
+                    let netns_fd = File::open(&netns_path)?;
 
-            setns(netns_fd, CloneFlags::CLONE_NEWNET)?;
+                    setns(netns_fd, CloneFlags::CLONE_NEWNET)?;
 
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-            rt.block_on(async {
-                let (conn, handle, _) = rtnetlink::new_connection().unwrap();
-                tokio::spawn(conn);
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()?;
 
-                let mut links = handle.link().get().match_name(veth_cont.clone()).execute();
-                let container_veth = links.try_next().await?.ok_or("[NETWORK] Veth not found in container")?;
-                let c_veth_id = container_veth.header.index;
+                    rt.block_on(async {
+                        let (conn, handle, _) = rtnetlink::new_connection().unwrap();
+                        let conn_handle = tokio::spawn(conn);
 
-                handle
-                    .link()
-                    .set(
-                        LinkMessageBuilder::<LinkUnspec>::default()
-                            .index(c_veth_id)
-                            .up()
-                            .build()
-                    ).execute().await?;
+                        let setup_result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
 
-                handle
-                    .address()
-                    .add(c_veth_id, std::net::IpAddr::V4(ip), subnet_prefix)
-                    .execute()
-                    .await?;
+                            let mut links =
+                                handle.link().get().match_name(veth_cont.clone()).execute();
+                            let container_veth = links
+                                .try_next()
+                                .await?
+                                .ok_or("[NETWORK] Veth not found in container")?;
+                            let c_veth_id = container_veth.header.index;
 
-                handle
-                    .route()
-                    .add(RouteMessageBuilder::<Ipv4Addr>::default()
-                        .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
-                        .gateway(gateway_ip)
-                        .output_interface(c_veth_id)
-                        .build()
-                    )
-                    .execute()
-                    .await?;
+                            handle
+                                .link()
+                                .set(
+                                    LinkMessageBuilder::<LinkUnspec>::default()
+                                        .index(c_veth_id)
+                                        .up()
+                                        .build(),
+                                )
+                                .execute()
+                                .await?;
 
-                let mut lo_links = handle.link().get().match_name("lo".to_string()).execute();
-                if let Some(lo) = lo_links.try_next().await? {
-                    handle.link().set(
-                        LinkMessageBuilder::<LinkUnspec>::default()
-                            .index(lo.header.index)
-                            .up()
-                            .build()
-                    ).execute().await?;
-                }
+                            handle
+                                .address()
+                                .add(c_veth_id, std::net::IpAddr::V4(ip), subnet_prefix)
+                                .execute()
+                                .await?;
 
-                Ok(())
-            })
-        }).await?
-            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+                            handle
+                                .route()
+                                .add(
+                                    RouteMessageBuilder::<Ipv4Addr>::default()
+                                        .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
+                                        .gateway(gateway_ip)
+                                        .output_interface(c_veth_id)
+                                        .build(),
+                                )
+                                .execute()
+                                .await?;
+
+                            let mut lo_links =
+                                handle.link().get().match_name("lo".to_string()).execute();
+                            if let Some(lo) = lo_links.try_next().await? {
+                                handle
+                                    .link()
+                                    .set(
+                                        LinkMessageBuilder::<LinkUnspec>::default()
+                                            .index(lo.header.index)
+                                            .up()
+                                            .build(),
+                                    )
+                                    .execute()
+                                    .await?;
+                            }
+
+                            Ok(())
+                        }.await;
+
+                        conn_handle.abort();
+
+                        Ok(())
+                    })
+                },
+            );
+
+            thread_handle.join()
+                .map_err(|e| format!("[NETWORK] Failed to join thread: {:?}", e))?;
+
+            Ok(())
+        });
 
         Ok(())
     }
 
     async fn get_link_index(&self, name: &str) -> Result<u32, rtnetlink::Error> {
-        let mut links = self.handle
-            .link()
-            .get()
-            .match_name(name)
-            .execute();
+        let mut links = self.handle.link().get().match_name(name).execute();
 
         if let Some(link) = links.try_next().await? {
             Ok(link.header.index)
         } else {
-            Err(rtnetlink::Error::NamespaceError(format!("[NETWORK ERROR] Interface not found: {}", name)))
+            Err(rtnetlink::Error::NamespaceError(format!(
+                "[NETWORK ERROR] Interface not found: {}",
+                name
+            )))
         }
     }
 }

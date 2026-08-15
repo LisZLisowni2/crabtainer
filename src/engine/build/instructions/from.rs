@@ -109,8 +109,8 @@ pub async fn from_image(base_image: &String, output_layout_name: &String) -> Res
 mod tests {
     use super::*;
     use crate::engine::support::test_utils::with_home;
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use tar::Builder;
 
     fn layer_tar_gz() -> Vec<u8> {
@@ -124,7 +124,8 @@ mod tests {
             header.set_size(content.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            tar.append_data(&mut header, "rootfile.txt", &content[..]).unwrap();
+            tar.append_data(&mut header, "rootfile.txt", &content[..])
+                .unwrap();
 
             let inner = tar.into_inner().unwrap();
             inner.finish().unwrap();
@@ -185,11 +186,8 @@ mod tests {
             std::fs::write(image_dir.join("layer_0.tar.gz"), layer_tar_gz()).unwrap();
             std::fs::write(image_dir.join("config.json"), r#"{"schemaVersion":2}"#).unwrap();
 
-            futures::executor::block_on(from_image(
-                &"ubuntu".to_string(),
-                &"layout".to_string(),
-            ))
-            .unwrap();
+            futures::executor::block_on(from_image(&"ubuntu".to_string(), &"layout".to_string()))
+                .unwrap();
 
             let rootfs = dir.path().join("layouts/layout/rootfs");
             assert_eq!(

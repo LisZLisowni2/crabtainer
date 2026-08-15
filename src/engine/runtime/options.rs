@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct ContainerOptions {
