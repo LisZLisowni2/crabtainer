@@ -295,7 +295,7 @@ pub async fn spawn_detach_container(
                             container_id.as_str(),
                             child_pid.as_raw().cast_unsigned(),
                             assigned_ip,
-                            handle
+                            handle,
                         )
                         .await;
 
