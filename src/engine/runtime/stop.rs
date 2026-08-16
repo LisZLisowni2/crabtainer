@@ -1,14 +1,21 @@
-use std::fs;
-use std::path::PathBuf;
-use nix::mount::{umount2, MntFlags};
 use crate::engine::runtime::network::Ipam;
 use crate::engine::runtime::options::RuntimeConfig;
+use nix::mount::{MntFlags, umount2};
+use std::fs;
+use std::path::PathBuf;
 
-pub async fn stop_container(ipam: Ipam, container_id: &String, container_pid: i32, cgroup_dir: &PathBuf, container_workdir: PathBuf, runtime_config: &mut RuntimeConfig) -> Result<(), String> {
+pub async fn stop_container(
+    ipam: Ipam,
+    container_id: &String,
+    container_pid: i32,
+    cgroup_dir: &PathBuf,
+    container_workdir: PathBuf,
+    runtime_config: &mut RuntimeConfig,
+) -> Result<(), String> {
     let merged_rootfs = container_workdir.join("rootfs");
 
     let released_ip = ipam
-        .release(&container_id)
+        .release(container_id)
         .await
         .map_err(|e| e.to_string())?;
     println!(
@@ -16,7 +23,7 @@ pub async fn stop_container(ipam: Ipam, container_id: &String, container_pid: i3
         &container_id, released_ip
     );
 
-    if let Err(e) = fs::remove_dir(&cgroup_dir) {
+    if let Err(e) = fs::remove_dir(cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
     }
 
@@ -34,16 +41,16 @@ pub async fn stop_container(ipam: Ipam, container_id: &String, container_pid: i3
             .unwrap()
             .into_bytes(),
     )
-        .unwrap();
-    
+    .unwrap();
+
     println!("[HOST] Killing a process");
-    
-    let pid = nix::unistd::Pid::from_raw(container_pid as i32);
-    
+
+    let pid = nix::unistd::Pid::from_raw(container_pid);
+
     nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL)
         .expect("[ERROR] Failed to kill container");
-    
+
     println!("[HOST] Container stopped");
-    
+
     Ok(())
 }

@@ -1,11 +1,13 @@
-use std::ffi::CString;
-use std::io::{Read, Write};
-use std::os::fd::{AsFd, AsRawFd, FromRawFd};
+use crate::engine::support::paths::RustockerPaths;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nix::pty::OpenptyResult;
 use nix::sched::CloneFlags;
-use nix::unistd::{fork, ForkResult, execvp, setsid, dup2_stdin, dup2_stderr, dup2_stdout, chdir, chroot};
-use crate::engine::support::paths::RustockerPaths;
+use nix::unistd::{
+    ForkResult, chdir, chroot, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, setsid,
+};
+use std::ffi::CString;
+use std::io::{Read, Write};
+use std::os::fd::{AsFd, AsRawFd};
 
 pub struct ExecOptions {
     pub interactive: bool,
@@ -14,7 +16,11 @@ pub struct ExecOptions {
     pub args: Option<Vec<String>>,
 }
 
-pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec_with_tty(
+    container_pid: i32,
+    container_id: String,
+    opts: ExecOptions,
+) -> Result<i32, Box<dyn std::error::Error>> {
     let OpenptyResult { master, slave } = nix::pty::openpty(None, None)?;
 
     match unsafe { fork()? } {
@@ -32,7 +38,9 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
                 let mut stdout = std::io::stdout();
 
                 while let Ok(n) = master_read.read(&mut buf) {
-                    if n == 0 { break }
+                    if n == 0 {
+                        break;
+                    }
 
                     let _ = stdout.write_all(&buf[..n]);
                     let _ = stdout.flush();
@@ -45,14 +53,20 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
                     let mut stdin = std::io::stdin();
 
                     while let Ok(n) = stdin.read(&mut buf) {
-                        if n == 0 { break }
-                        if master_write.write_all(&buf[..n]).is_err() { break; }
+                        if n == 0 {
+                            break;
+                        }
+                        if master_write.write_all(&buf[..n]).is_err() {
+                            break;
+                        }
                     }
                 });
             }
 
             let mut status = 0;
-            unsafe { nix::libc::waitpid(child.as_raw(), &mut status, 0); }
+            unsafe {
+                nix::libc::waitpid(child.as_raw(), &mut status, 0);
+            }
 
             disable_raw_mode()?;
 
@@ -61,9 +75,11 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
         }
         ForkResult::Child => {
             drop(master);
-            setsid();
+            let _ = setsid();
 
-            unsafe { nix::libc::ioctl(slave.as_raw_fd(), nix::libc::TIOCSCTTY, 0); }
+            unsafe {
+                nix::libc::ioctl(slave.as_raw_fd(), nix::libc::TIOCSCTTY, 0);
+            }
 
             join_namespaces(container_pid);
 
@@ -71,7 +87,9 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
                 ForkResult::Parent { child } => {
                     let mut status = 0;
 
-                    unsafe { nix::libc::waitpid(child.as_raw(), &mut status, 0); }
+                    unsafe {
+                        nix::libc::waitpid(child.as_raw(), &mut status, 0);
+                    }
 
                     Ok(status)
                 }
@@ -81,7 +99,9 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
                     dup2_stderr(slave.as_fd())?;
                     drop(slave);
 
-                    unsafe { std::env::set_var("TERM", "xterm-256color"); }
+                    unsafe {
+                        std::env::set_var("TERM", "xterm-256color");
+                    }
 
                     let container_path = RustockerPaths::runtime_dir().join(&container_id);
                     let rootfs = container_path.join("rootfs");
@@ -106,12 +126,17 @@ pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions
     }
 }
 
-pub fn exec_with_pipes(container_pid: i32, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec_with_pipes(
+    container_pid: i32,
+    opts: ExecOptions,
+) -> Result<i32, Box<dyn std::error::Error>> {
     match unsafe { fork()? } {
         ForkResult::Parent { child } => {
             let mut status = 0;
 
-            unsafe { nix::libc::waitpid(child.as_raw(), &mut status, 0); }
+            unsafe {
+                nix::libc::waitpid(child.as_raw(), &mut status, 0);
+            }
 
             Ok(status)
         }
@@ -126,7 +151,7 @@ pub fn exec_with_pipes(container_pid: i32, opts: ExecOptions) -> Result<i32, Box
                 }
             }
 
-            execvp(&c_cmd, &c_args);
+            let _ = execvp(&c_cmd, &c_args);
 
             unreachable!();
         }
