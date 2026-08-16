@@ -14,7 +14,7 @@ pub struct ExecOptions {
     pub args: Option<Vec<String>>,
 }
 
-pub fn exec_with_tty(container_pid: u32, container_id: String, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec_with_tty(container_pid: i32, container_id: String, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
     let OpenptyResult { master, slave } = nix::pty::openpty(None, None)?;
 
     match unsafe { fork()? } {
@@ -106,7 +106,7 @@ pub fn exec_with_tty(container_pid: u32, container_id: String, opts: ExecOptions
     }
 }
 
-pub fn exec_with_pipes(container_pid: u32, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec_with_pipes(container_pid: i32, opts: ExecOptions) -> Result<i32, Box<dyn std::error::Error>> {
     match unsafe { fork()? } {
         ForkResult::Parent { child } => {
             let mut status = 0;
@@ -134,7 +134,7 @@ pub fn exec_with_pipes(container_pid: u32, opts: ExecOptions) -> Result<i32, Box
 }
 
 pub fn exec_in_container(
-    container_pid: u32,
+    container_pid: i32,
     container_id: String,
     opts: ExecOptions,
 ) -> Result<i32, Box<dyn std::error::Error>> {
@@ -145,7 +145,7 @@ pub fn exec_in_container(
     }
 }
 
-fn join_namespaces(container_pid: u32) {
+fn join_namespaces(container_pid: i32) {
     let namespaces = [
         // ("ipc", CloneFlags::CLONE_NEWIPC),
         // ("uts", CloneFlags::CLONE_NEWUTS),

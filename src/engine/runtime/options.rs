@@ -20,7 +20,7 @@ pub struct ContainerReady {
     pub memory_limit: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum ContainerStatus {
     Active,
     Stopped,
@@ -40,5 +40,6 @@ pub struct RuntimeConfig {
     pub status: ContainerStatus,
     pub workdir: PathBuf,
     pub ip_address: Ipv4Addr,
-    pub pid: u32,
+    pub pid: i32,
+    pub boot_id: String,
 }

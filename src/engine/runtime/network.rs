@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -306,7 +307,7 @@ impl NetworkManager {
     pub async fn attach_container_with_custom_handle(
         &self,
         container_id: &str,
-        container_pid: u32,
+        container_pid: i32,
         ip: Ipv4Addr,
         handle: Handle,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -330,7 +331,7 @@ impl NetworkManager {
     pub async fn attach_container(
         &self,
         container_id: &str,
-        container_pid: u32,
+        container_pid: i32,
         ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let short_id = &container_id[..6.min(container_id.len())];
@@ -369,16 +370,21 @@ impl NetworkManager {
             .await?;
         println!("[NETWORK] Set up and master for veth {}", veth_host);
 
+        let netns_path = format!("/proc/{}/ns/net", container_pid);
+        let netns_fd = File::open(&netns_path)
+            .map_err(|e| format!("[ERROR] Failed to open netns path '{}': {}", netns_path, e))?;
+        
         self.handle
             .link()
             .set(
                 LinkMessageBuilder::<LinkUnspec>::default()
                     .index(veth_cont_id)
-                    .setns_by_pid(container_pid)
+                    .setns_by_fd(netns_fd.as_raw_fd())
                     .build(),
             )
             .execute()
-            .await?;
+            .await
+            .map_err(|e| format!("[ERROR] setns: {}", e))?;
         println!("[NETWORK] Setns to container: {}", container_id);
 
         let gateway_ip = self.gateway_ip;
@@ -390,9 +396,6 @@ impl NetworkManager {
                     move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         use nix::sched::{CloneFlags, setns};
                         use std::fs::File;
-
-                        let netns_path = format!("/proc/{}/ns/net", container_pid);
-                        let netns_fd = File::open(&netns_path)?;
 
                         setns(netns_fd, CloneFlags::CLONE_NEWNET)?;
 

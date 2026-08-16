@@ -1,6 +1,6 @@
 use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::runtime::network::{Ipam, NetworkManager};
-use crate::engine::runtime::options::ContainerOptions;
+use crate::engine::runtime::options::{ContainerOptions, ContainerStatus};
 use crate::engine::support::paths::RustockerPaths;
 use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
@@ -16,8 +16,10 @@ use std::ffi::CString;
 use std::fs;
 use std::io::Write;
 use std::net::Ipv4Addr;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
+use nix::libc::option;
+use crate::engine::runtime::refresh::save_boot_id;
 
 pub fn generate_container_id() -> String {
     let mut rng = rand::rng();
@@ -227,8 +229,7 @@ pub async fn spawn_detach_container(
                     | CloneFlags::CLONE_NEWNS
                     | CloneFlags::CLONE_NEWNET;
 
-                let (read_fd, write_fd) =
-                    nix::unistd::pipe().expect("[HOST] Failed to create pipe");
+                let (read_fd, write_fd) = nix::unistd::pipe().expect("[HOST] Failed to create pipe");
 
                 let child_pid = unsafe {
                     clone(
@@ -247,6 +248,10 @@ pub async fn spawn_detach_container(
                     .expect("[ERROR] Failed to spawn child.")
                 };
 
+                if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
+                    eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
+                };
+
                 let container_name = if let Some(name) = &opts.container_name {
                     name.clone()
                 } else {
@@ -260,12 +265,15 @@ pub async fn spawn_detach_container(
 
                 let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
                     container_name,
-                    status: crate::engine::runtime::options::ContainerStatus::Active,
+                    status: ContainerStatus::Exited,
                     layout_name: opts.layout_name.clone(),
                     ip_address: assigned_ip,
                     workdir: PathBuf::from(cwd),
-                    pid: child_pid.as_raw().cast_unsigned(),
+                    pid: child_pid.as_raw(),
+                    boot_id: save_boot_id()
                 };
+
+                runtime_config.status = ContainerStatus::Active;
 
                 fs::write(
                     container_workdir.join("config.json"),
@@ -273,11 +281,7 @@ pub async fn spawn_detach_container(
                         .unwrap()
                         .into_bytes(),
                 )
-                .unwrap();
-
-                if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
-                    eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
-                };
+                    .unwrap();
 
                 let _ = nix::unistd::write(write_fd, b"1");
 
@@ -293,7 +297,7 @@ pub async fn spawn_detach_container(
                     let setup_res = network_manager
                         .attach_container_with_custom_handle(
                             container_id.as_str(),
-                            child_pid.as_raw().cast_unsigned(),
+                            child_pid.as_raw(),
                             assigned_ip,
                             handle,
                         )
@@ -311,18 +315,32 @@ pub async fn spawn_detach_container(
                 dup2_stdin(&saved_stdin).expect("[ERROR] Failed to restore stdin");
 
                 tokio::task::spawn_blocking(move || {
-                    if let Err(e) = nix::sys::wait::waitpid(child_pid, None) {
-                        eprintln!("[WARN] Failed to wait for child process: {}", e);
-                    } else {
-                        runtime_config.status =
-                            crate::engine::runtime::options::ContainerStatus::Stopped;
-                        fs::write(
-                            container_workdir.join("config.json"),
-                            serde_json::to_string_pretty(&runtime_config)
-                                .unwrap()
-                                .into_bytes(),
-                        )
-                        .unwrap();
+                    match nix::sys::wait::waitpid(child_pid, None) {
+                        Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
+                            println!("[INFO] Container exited with code {}", status);
+                            if status != 0 {
+                                return Err(format!("Container process failed with exit code: {}", status));
+                            }
+
+                            runtime_config.status = ContainerStatus::Stopped;
+                            fs::write(
+                                container_workdir.join("config.json"),
+                                serde_json::to_string_pretty(&runtime_config)
+                                    .unwrap()
+                                    .into_bytes(),
+                            )
+                                .unwrap();
+
+                            Ok(())
+                        }
+                        Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
+                            Err(format!("Container process exited with signal {:?}", sig))
+                        }
+                        Ok(status) => {
+                            println!("[INFO] Container proceed changed state: {:?}", status);
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
                     }
                 });
             }
@@ -450,12 +468,16 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let child_pid = unsafe {
         clone(
-            Box::new(|| child_process(&merged_rootfs, &container_id, &final_opts)),
+            Box::new(|| { child_process(&merged_rootfs, &container_id, &final_opts) }),
             &mut stack[..],
             flags,
             Some(Signal::SIGCHLD as i32),
         )
         .expect("[ERROR] Failed to spawn child.")
+    };
+
+    if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
+        eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
 
     let container_name = if let Some(name) = &opts.container_name {
@@ -471,12 +493,15 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
         container_name,
-        status: crate::engine::runtime::options::ContainerStatus::Active,
+        status: ContainerStatus::Exited,
         layout_name: opts.layout_name.clone(),
         ip_address: assigned_ip,
         workdir: PathBuf::from(cwd),
-        pid: child_pid.as_raw().cast_unsigned(),
+        pid: child_pid.as_raw(),
+        boot_id: save_boot_id()
     };
+
+    runtime_config.status = ContainerStatus::Active;
 
     fs::write(
         container_workdir.join("config.json"),
@@ -484,26 +509,39 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
             .unwrap()
             .into_bytes(),
     )
-    .unwrap();
+        .unwrap();
 
     network_manager
         .attach_container(
             container_id.as_str(),
-            child_pid.as_raw().cast_unsigned(),
+            child_pid.as_raw(),
             assigned_ip,
         )
         .await
         .map_err(|e| e.to_string())?;
 
-    if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
-        eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
-    };
-
     tokio::task::spawn_blocking(move || {
-        nix::sys::wait::waitpid(child_pid, None).unwrap();
+        match nix::sys::wait::waitpid(child_pid, None) {
+            Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
+                println!("[INFO] Container exited with code {}", status);
+                if status != 0 {
+                    return Err(format!("Container process failed with exit code: {}", status));
+                }
+
+                Ok(())
+            }
+            Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
+                Err(format!("Container process exited with signal {:?}", sig))
+            }
+            Ok(status) => {
+                println!("[INFO] Container proceed changed state: {:?}", status);
+                Ok(())
+            }
+            Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
+        }
     })
     .await
-    .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))?;
+    .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))??;
 
     let released_ip = ipam
         .release(&container_id)
@@ -524,7 +562,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    runtime_config.status = crate::engine::runtime::options::ContainerStatus::Stopped;
+    runtime_config.status = ContainerStatus::Stopped;
 
     fs::write(
         container_workdir.join("config.json"),
@@ -548,7 +586,7 @@ fn detach_child_process(
     rootfs: &Path,
     container_id: &String,
     options: &crate::engine::runtime::options::ContainerReady,
-    sync_raw_fd: std::os::fd::RawFd,
+    sync_raw_fd: RawFd,
 ) -> isize {
     let mut buf = [0u8; 1];
     let sync_read_fd = unsafe { OwnedFd::from_raw_fd(sync_raw_fd) };
@@ -636,15 +674,24 @@ fn child_process(
         eprintln!("[WARN] Failed to remove old root: {}", e);
     }
 
-    let cmd_cstring = CString::new(options.args[0].clone()).unwrap();
-    let mut args_cstring = vec![cmd_cstring.clone()];
-    for arg in &options.args[1..] {
-        args_cstring.push(CString::new(arg.clone()).unwrap());
+    if options.args.is_empty() {
+        eprintln!("[CHILD ERROR] No command specified for container execution.");
+        std::process::exit(1);
     }
 
-    execvp(&cmd_cstring, &args_cstring).ok();
+    let cmd_cstring: CString = CString::new(options.args[0].clone()).unwrap();
+    let args_cstring: Vec<CString> = options.args
+        .iter()
+        .map(|arg| CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString"))
+        .collect();
 
-    0
+    match execvp(&cmd_cstring, &args_cstring) {
+        Ok(_) => unreachable!(),
+        Err(e) => {
+            eprintln!("[CHILD ERROR] Failed to exec container command: {}", e);
+            std::process::exit(127);
+        }
+    };
 }
 
 #[cfg(test)]

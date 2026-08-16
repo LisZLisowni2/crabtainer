@@ -12,3 +12,5 @@ pub mod container;
 pub mod network;
 pub mod options;
 pub mod exec;
+pub mod stop;
+pub mod refresh;

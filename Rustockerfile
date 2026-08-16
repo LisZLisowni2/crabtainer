@@ -9,3 +9,5 @@ FROM gentoo
 # COPY src/lib.rs /test/
 # COPY src /test/src/
 # COPY * /test/entire_base/
+
+CMD ech hello

@@ -1,12 +1,16 @@
+use std::borrow::Cow;
 use clap::{Parser, Subcommand};
 use nix::sched::CloneFlags;
 use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
-use rustocker::engine::runtime::options::{ContainerOptions, RuntimeConfig};
+use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RuntimeConfig};
 use rustocker::engine::support::paths::RustockerPaths;
 use std::os::fd::{AsFd, AsRawFd};
+use std::path::{Path, PathBuf};
 use std::ptr::null;
 use rustocker::engine::runtime::exec::ExecOptions;
+use rustocker::engine::runtime::network::Ipam;
+use rustocker::engine::runtime::stop::stop_container;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -78,6 +82,7 @@ enum Commands {
         )]
         args: Option<Vec<String>>,
     },
+    Refresh,
     Images,
     Layouts,
 }
@@ -169,6 +174,7 @@ async fn main() {
             }
         }
         Commands::Ps => {
+            // rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
             let container_dir = RustockerPaths::runtime_dir();
             println!(
                 "{:<15} {:<20} {:<20} {:<15}",
@@ -196,10 +202,31 @@ async fn main() {
             }
         }
         Commands::Stop { id } => {
-            let runtime_dir = RustockerPaths::runtime_dir().join(id);
+            let runtime_dir = RustockerPaths::runtime_dir().join(&id);
+            let target_pid = find_pid(&id, &runtime_dir);
+
+            let config_str = std::fs::read_to_string(runtime_dir.join("config.json")).expect("[ERROR] Failed to read config");
+            let mut config = serde_json::from_str::<RuntimeConfig>(&config_str).expect("[ERROR] Failed to parse config");
+
+            if config.status == ContainerStatus::Active {
+                let ipam: Ipam = Ipam::new("172.19.0.0/16", RustockerPaths::base_dir().join("ipam.json")).unwrap();
+
+                stop_container(ipam, &id, target_pid, &runtime_dir, PathBuf::from("/sys/fs/cgroup"), &mut config).await.expect("[ERROR] Failed to stop container");
+                config.status = ContainerStatus::Stopped;
+
+                std::fs::write(
+                    &runtime_dir.join("config.json"),
+                    serde_json::to_string_pretty(&config)
+                        .unwrap()
+                        .as_bytes(),
+                ).expect("[ERROR] Failed to write config");
+            }
         }
         Commands::Rm { id } => {
-            let runtime_dir = RustockerPaths::runtime_dir().join(id);
+            let runtime_dir = RustockerPaths::runtime_dir().join(&id);
+            let target_pid = find_pid(&id, &runtime_dir);
+
+
         }
         Commands::Exec {
             id,
@@ -209,16 +236,7 @@ async fn main() {
             args
         } => {
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
-            let mut target_pid: u32 = 0;
-
-            if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
-                match serde_json::from_str::<RuntimeConfig>(content.as_str()) {
-                    Ok(config) => {
-                        target_pid = config.pid;
-                    }
-                    Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", &id),
-                }
-            }
+            let target_pid = find_pid(&id, runtime_dir);
   
             let opts = ExecOptions {
                 interactive,
@@ -231,10 +249,30 @@ async fn main() {
                 .await
                 .expect("[ERROR] Failed to execute handle_exec");
         }
+        Commands::Refresh => {
+            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+        }
     }
 }
 
-pub async fn handle_exec(container_pid: u32, container_id: String, opts: ExecOptions) -> Result<(), Box<dyn std::error::Error>> {
+fn find_pid<'a, P>(id: &String, container_dir: P) -> i32
+where P: Into<Cow<'a, Path>>
+{
+    let mut target_pid: i32 = 0;
+
+    if let Ok(content) = std::fs::read_to_string(container_dir.into().join("config.json")) {
+        match serde_json::from_str::<RuntimeConfig>(content.as_str()) {
+            Ok(config) => {
+                target_pid = config.pid;
+            }
+            Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", &id),
+        }
+    }
+
+    target_pid
+}
+
+pub async fn handle_exec(container_pid: i32, container_id: String, opts: ExecOptions) -> Result<(), Box<dyn std::error::Error>> {
     tokio::task::spawn_blocking(move || {
         rustocker::engine::runtime::exec::exec_in_container(
             container_pid,
