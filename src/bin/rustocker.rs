@@ -34,7 +34,7 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         rm: bool,
 
-        #[arg(short, long, default_value = "")]
+        #[arg(short, long)]
         name: Option<String>,
 
         #[arg(short = 'C', long)]
