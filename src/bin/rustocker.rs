@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::io::Error;
 use clap::{Parser, Subcommand};
 use nix::sched::CloneFlags;
 use rustocker::engine::build::builder::build_layout;
@@ -8,6 +9,7 @@ use rustocker::engine::support::paths::RustockerPaths;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 use std::ptr::null;
+use getch_rs::Key;
 use rustocker::engine::runtime::exec::ExecOptions;
 use rustocker::engine::runtime::network::Ipam;
 use rustocker::engine::runtime::stop::stop_container;
@@ -224,10 +226,36 @@ async fn main() {
             }
         }
         Commands::Rm { id } => {
-            let runtime_dir = RustockerPaths::runtime_dir().join(&id);
-            let target_pid = find_pid(&id, &runtime_dir);
+            if id != "." {
+                handle_deletion_of_container(id).await;
+            } else {
+                print!("Are you sure to delete all stopped containers? [y/n]");
+                let g = getch_rs::Getch::new();
 
+                loop {
+                    match g.getch() {
+                        Ok(Key::Char('n')) => { break; }
+                        Ok(Key::Char('y')) => {
+                            if let Ok(dirs) = std::fs::read_dir(RustockerPaths::runtime_dir()) {
+                                for entry in dirs.flatten() {
+                                    let path = entry.path();
+                                    let name = path
+                                        .file_name()
+                                        .unwrap()
+                                        .to_str()
+                                        .unwrap()
+                                        .to_string();
 
+                                    handle_deletion_of_container(name).await;
+                                }
+                            }
+                            break;
+                        }
+                        Err(e) => eprintln!("[WARN] Failed to get ch: {}", e),
+                        _ => {}
+                    }
+                }
+            }
         }
         Commands::Exec {
             id,
@@ -252,6 +280,25 @@ async fn main() {
         }
         Commands::Refresh => {
             rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+        }
+    }
+}
+
+async fn handle_deletion_of_container(id: String) {
+    let runtime_dir = RustockerPaths::runtime_dir().join(&id);
+
+    if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
+        if let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content) {
+            if config.status == ContainerStatus::Active {
+                eprintln!("[ERROR] Active container cannot be deleted. Stop it first");
+                std::process::exit(1);
+            }
+
+            if let Err(e) = std::fs::remove_dir_all(&runtime_dir) {
+                eprintln!("[WARN] Failed to remove container dir: {}", e);
+            } else {
+                println!("{}", id);
+            }
         }
     }
 }
