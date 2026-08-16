@@ -34,7 +34,11 @@ sudo ./target/release/rustocker
 
 ## LICENSE
 
-The license for this project is based on APACHE 2.0 license. Look at [license](LICENSE) for futher information.
+The license for this project is based on APACHE 2.0 license. Look at [license](LICENSE) for further information.
+
+## Contribution and AI policy
+
+You're welcome if you want to contribute. Look at [CONTRIBUTING.md](CONTRIBUTING.md) for further information. 
 
 ## Other
 
