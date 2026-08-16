@@ -78,8 +78,8 @@ mod tests {
         let home = dir.path().to_str().unwrap().to_string();
 
         with_home(&home, || {
-            let err = futures::executor::block_on(download_image_if_missing("", "alias"))
-                .unwrap_err();
+            let err =
+                futures::executor::block_on(download_image_if_missing("", "alias")).unwrap_err();
             assert!(
                 err.contains("Invalid image reference"),
                 "unexpected error: {}",
