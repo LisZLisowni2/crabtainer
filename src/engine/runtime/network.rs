@@ -373,7 +373,7 @@ impl NetworkManager {
         let netns_path = format!("/proc/{}/ns/net", container_pid);
         let netns_fd = File::open(&netns_path)
             .map_err(|e| format!("[ERROR] Failed to open netns path '{}': {}", netns_path, e))?;
-        
+
         self.handle
             .link()
             .set(

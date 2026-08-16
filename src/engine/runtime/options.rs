@@ -20,7 +20,7 @@ pub struct ContainerReady {
     pub memory_limit: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum ContainerStatus {
     Active,
     Stopped,
@@ -33,7 +33,7 @@ impl std::fmt::Display for ContainerStatus {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RuntimeConfig {
     pub layout_name: String,
     pub container_name: String,

@@ -127,6 +127,7 @@ async fn main() {
 
             let container_id = rustocker::engine::runtime::container::generate_container_id();
 
+            // TODO: Handle bad commands (empty or invalid ones)
             if !detach {
                 run_container(options, container_id).await.unwrap();
             } else {

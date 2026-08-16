@@ -19,6 +19,7 @@ use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use nix::libc::option;
+use nix::sys::wait::WaitStatus;
 use crate::engine::runtime::refresh::save_boot_id;
 
 pub fn generate_container_id() -> String {
@@ -265,15 +266,13 @@ pub async fn spawn_detach_container(
 
                 let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
                     container_name,
-                    status: ContainerStatus::Exited,
+                    status: ContainerStatus::Active,
                     layout_name: opts.layout_name.clone(),
                     ip_address: assigned_ip,
                     workdir: PathBuf::from(cwd),
                     pid: child_pid.as_raw(),
                     boot_id: save_boot_id()
                 };
-
-                runtime_config.status = ContainerStatus::Active;
 
                 fs::write(
                     container_workdir.join("config.json"),
@@ -310,39 +309,92 @@ pub async fn spawn_detach_container(
                     }
                 });
 
-                dup2_stdout(&saved_stdout).expect("[ERROR] Failed to restore stdout");
-                dup2_stderr(&saved_stderr).expect("[ERROR] Failed to restore stderr");
-                dup2_stdin(&saved_stdin).expect("[ERROR] Failed to restore stdin");
+                let container_workdir_clone = container_workdir.clone();
 
-                tokio::task::spawn_blocking(move || {
-                    match nix::sys::wait::waitpid(child_pid, None) {
+                rt.block_on(async move {
+                    let wait_result = tokio::task::spawn_blocking(move || {
+                        nix::sys::wait::waitpid(child_pid, None)
+                    })
+                        .await.unwrap();
+
+                    let exit_status: Result<i32, String> = match wait_result {
                         Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
                             println!("[INFO] Container exited with code {}", status);
-                            if status != 0 {
-                                return Err(format!("Container process failed with exit code: {}", status));
-                            }
-
-                            runtime_config.status = ContainerStatus::Stopped;
-                            fs::write(
-                                container_workdir.join("config.json"),
-                                serde_json::to_string_pretty(&runtime_config)
-                                    .unwrap()
-                                    .into_bytes(),
-                            )
-                                .unwrap();
-
-                            Ok(())
+                            Ok(status)
                         }
                         Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
                             Err(format!("Container process exited with signal {:?}", sig))
                         }
                         Ok(status) => {
                             println!("[INFO] Container proceed changed state: {:?}", status);
-                            Ok(())
+                            Ok(0)
                         }
                         Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
+                    };
+
+                    tokio::task::spawn_blocking(move || {
+                        runtime_config.status = ContainerStatus::Stopped;
+                        if let Ok(config) = serde_json::to_string_pretty(&runtime_config) {
+                            let _ = fs::write(
+                                container_workdir.join("config.json"),
+                                config
+                            );
+                        }
+
+                        if let Err(e) = fs::remove_dir(&cgroup_dir) {
+                            eprintln!("[WARN] Error during cgroup deletion: {}", e);
+                        }
+
+                        println!("[HOST] Umount overlayfs");
+                        if let Err(e) = umount2(&merged_rootfs, MntFlags::empty()) {
+                            eprintln!("[WARN] Standard umount failed ({}), trying MNT_DETACH...", e);
+                            if let Err(e_detach) = umount2(&merged_rootfs, MntFlags::MNT_DETACH) {
+                                eprintln!("[ERROR] Failed to detach overlayfs: {}", e_detach);
+                            }
+                        }
+
+                        if opts.rm {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            if let Err(e) = fs::remove_dir_all(&container_workdir)
+                                .map_err(|e| format!("[WARN] Failed to delete container workdir: {}", e)) {
+                                eprintln!("[WARN] Failed to delete container workdir: {}", e);
+                            }
+                        }
+                    })
+                        .await
+                        .unwrap();
+
+                    match ipam.release(&container_id).await {
+                        Ok(released_ip) => {
+                            println!("[INFO] Released ip for container {}: {}", &container_id, released_ip);
+                        }
+                        Err(e) => eprintln!("[WARN] Failed to release IP of container: {}", e),
                     }
-                });
+
+                    if let Ok(code) = exit_status {
+                        if code != 0 {
+                            return Err(format!("Container process exited with exit code: {}", code));
+                        }
+                    } else if let Err(msg) = exit_status {
+                        return Err(msg);
+                    }
+
+                    Ok(())
+                })
+                    .unwrap();
+
+                dup2_stdout(&saved_stdout).expect("[ERROR] Failed to restore stdout");
+                dup2_stderr(&saved_stderr).expect("[ERROR] Failed to restore stderr");
+                dup2_stdin(&saved_stdin).expect("[ERROR] Failed to restore stdin");
+
+                // Kill a child process to prevent zombie process
+                if let Ok(pid_str) = fs::read_to_string(container_workdir_clone.join("pid")) {
+                    if let Ok(pid) = pid_str.parse::<i32>() {
+                        if let Err(e) = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), Signal::SIGKILL) {
+                            eprintln!("[ERROR] Failed to kill container: {}", e);
+                        }
+                    }
+                }
             }
         };
 
