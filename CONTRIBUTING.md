@@ -73,6 +73,16 @@ Keep PRs focused—try to keep individual pull requests targeted to a single iss
 Write unit tests for new functionality where reasonable.
 Document new public functions or complex logic.
 
+## AI Usage Policy
+
+In short, it is acceptable to use AI for this codebase, but careless vibe coding is strictly prohibited.
+Every line you write and submit is your responsibility. You must understand how your code works and
+why it was written that way. You also possibly have to be able to explain
+or refactor it during code review. All AI-generated code must be tested, debugged and validated before opening a 
+pull request due to risk of hallucinations, outdated libraries or patterns and subtle bugs.
+I (LisZLisowni2) encourage using AI as an assistant that helps in coding, but can not be a substitute for software engineering.
+If you are unsure, please ask!
+
 ## Need Help?
 
 If you have questions or aren't sure where to start, feel free to open a Q&A thread in GitHub Discussions or comment on an open issue!
