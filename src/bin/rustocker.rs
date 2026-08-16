@@ -10,6 +10,7 @@ use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 use getch_rs::Key;
+use walkdir::WalkDir;
 use rustocker::engine::runtime::exec::ExecOptions;
 use rustocker::engine::runtime::network::Ipam;
 use rustocker::engine::runtime::stop::stop_container;
@@ -153,7 +154,19 @@ async fn main() {
                         .unwrap()
                         .to_string_lossy()
                         .replace(".tar.gz", "");
-                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+
+                    let size = if path.is_dir() {
+                        WalkDir::new(path)
+                            .into_iter()
+                            .filter_map(|e| e.ok())
+                            .filter_map(|e| e.metadata().ok())
+                            .filter(|m| m.is_file())
+                            .map(|m| m.len())
+                            .sum()
+                    } else {
+                        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                    };
+
                     println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
                 }
             }
@@ -171,8 +184,20 @@ async fn main() {
                         .unwrap()
                         .to_string_lossy()
                         .replace(".tar.gz", "");
-                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                    println!("{:<20} {:<15}", name, size / 1024 / 1024);
+
+                    let size = if path.is_dir() {
+                        WalkDir::new(path)
+                            .into_iter()
+                            .filter_map(|e| e.ok())
+                            .filter_map(|e| e.metadata().ok())
+                            .filter(|m| m.is_file())
+                            .map(|m| m.len())
+                            .sum()
+                    } else {
+                        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                    };
+
+                    println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
                 }
             }
         }
