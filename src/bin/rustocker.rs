@@ -77,7 +77,6 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, requires = "cmd")]
         args: Option<Vec<String>>,
     },
-    Refresh,
     Images,
     Layouts,
 }
@@ -133,7 +132,7 @@ async fn main() {
             build_layout(file, tag).await.unwrap();
         }
         Commands::Images => {
-            let store = rustocker::engine::support::paths::RustockerPaths::image_store_dir();
+            let store = RustockerPaths::image_store_dir();
             println!("{:<20} {:<15}", "ALIAS", "SIZE");
             println!("{}", "-".repeat(38));
             std::fs::read_dir(&store).ok();
@@ -164,7 +163,7 @@ async fn main() {
             }
         }
         Commands::Layouts => {
-            let store = rustocker::engine::support::paths::RustockerPaths::layout_store_dir();
+            let store = RustockerPaths::layout_store_dir();
             println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
             println!("{}", "-".repeat(38));
 
@@ -194,7 +193,7 @@ async fn main() {
             }
         }
         Commands::Ps => {
-            // rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
             let container_dir = RustockerPaths::runtime_dir();
             println!(
                 "{:<15} {:<20} {:<20} {:<15}",
@@ -222,6 +221,7 @@ async fn main() {
             }
         }
         Commands::Stop { id } => {
+            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, &runtime_dir);
 
@@ -257,6 +257,7 @@ async fn main() {
             }
         }
         Commands::Rm { id } => {
+            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
             if id != "." {
                 handle_deletion_of_container(id).await;
             } else {
@@ -306,11 +307,6 @@ async fn main() {
             handle_exec(target_pid, id, opts)
                 .await
                 .expect("[ERROR] Failed to execute handle_exec");
-        }
-        Commands::Refresh => {
-            rustocker::engine::runtime::refresh::refresh_container_states()
-                .await
-                .expect("[ERROR] Failed to refresh container states");
         }
     }
 }

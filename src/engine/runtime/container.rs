@@ -539,6 +539,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
 
+
     let container_name = if let Some(name) = &opts.container_name {
         name.clone()
     } else {
@@ -552,15 +553,13 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
         container_name,
-        status: ContainerStatus::Exited,
+        status: ContainerStatus::Active,
         layout_name: opts.layout_name.clone(),
         ip_address: assigned_ip,
         workdir: PathBuf::from(cwd),
         pid: child_pid.as_raw(),
         boot_id: save_boot_id(),
     };
-
-    runtime_config.status = ContainerStatus::Active;
 
     fs::write(
         container_workdir.join("config.json"),
@@ -707,6 +706,9 @@ fn child_process(
         eprintln!("[CHILD ERROR] Failed to chdir root: {}", e);
         return 1;
     }
+
+    fs::write("/etc/resolv.conf", "nameserver 1.1.1.1\n".as_bytes())
+        .expect("[ERROR] Failed to write resolv.conf file");
 
     let proc_target = Path::new("/proc");
 

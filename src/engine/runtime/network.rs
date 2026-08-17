@@ -6,6 +6,7 @@ use rtnetlink::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use crate::engine::support::paths::RustockerPaths;
 
 pub struct NetworkManager {
     handle: Handle,
@@ -221,7 +223,7 @@ impl NetworkManager {
         println!("[NETWORK] Setting iptables rules");
         self.add_iptables_rules(
             self.bridge_name.as_str(),
-            format!("{}/{}", self.gateway_ip, self.subnet_prefix).as_str(),
+            format!("172.19.0.0/{}", self.subnet_prefix).as_str(),
         )
         .await?;
 
@@ -237,7 +239,7 @@ impl NetworkManager {
 
         if !ipt.chain_exists("filter", "RUSTOCKER")? {
             ipt.new_chain("filter", "RUSTOCKER")?;
-            println!("[NETWORK] Created new ");
+            println!("[IPTABLES] Created new chain: RUSTOCKER");
         }
 
         let rule = format!("-s {} ! -o {} -j MASQUERADE", subnet_mask, bridge_name);
@@ -334,6 +336,10 @@ impl NetworkManager {
         container_pid: i32,
         ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Err(e) = fs::read_dir(format!("/proc/{}/ns/net", container_pid)) {
+            return Ok(());
+        }
+        
         let short_id = &container_id[..6.min(container_id.len())];
         let veth_host = format!("veth_{}", short_id);
         let veth_cont = format!("vethc_{}", short_id);

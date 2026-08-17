@@ -1,4 +1,4 @@
-DOWNLOAD 3.14.7-alpine3.24 AS python
+DOWNLOAD python:3.14.7-alpine3.24 AS python
 
 FROM python
 
