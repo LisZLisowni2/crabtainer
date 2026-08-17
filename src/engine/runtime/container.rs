@@ -707,7 +707,7 @@ fn child_process(
         return 1;
     }
 
-    fs::write("/etc/resolv.conf", "nameserver 1.1.1.1\n".as_bytes())
+    fs::write("/etc/resolv.conf", "nameserver 1.1.1.1\nnameserver 8.8.8.8\n".as_bytes())
         .expect("[ERROR] Failed to write resolv.conf file");
 
     let proc_target = Path::new("/proc");
