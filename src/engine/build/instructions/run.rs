@@ -1,6 +1,7 @@
 use crate::engine::support::paths::RustockerPaths;
 use nix::unistd::{chroot, chdir};
 use std::process::{Command};
+use std::os::unix::process::CommandExt;
 
 pub async fn run_in_container(output_layout_name: &String, command: String) -> Result<(), String> {
     println!(" => [RUN] Running '{}' command in container", command);
@@ -18,15 +19,18 @@ pub async fn run_in_container(output_layout_name: &String, command: String) -> R
     ) {
         return Err(e.to_string());
     }
-
-    let _ = chroot(rootfs_path.as_path());
     
-    let _ = chdir("/");
-
-    let status = Command::new("/bin/sh")
+    let status = unsafe {
+        Command::new("/bin/sh")
             .arg("-c")
             .arg(&command)
-            .status();
+            .pre_exec(move || {
+                chroot(rootfs_path.as_path())?;
+                chdir("/")?;
+                Ok(())
+            })
+            .status()
+    };
 
     match status {
         Ok(s) if s.success() => Ok(()),

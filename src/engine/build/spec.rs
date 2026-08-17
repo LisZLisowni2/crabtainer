@@ -53,6 +53,9 @@ pub async fn save_config(
                     LinuxNamespaceBuilder::default()
                         .typ(LinuxNamespaceType::Ipc)
                         .build()?,
+                    LinuxNamespaceBuilder::default()
+                        .typ(LinuxNamespaceType::Network)
+                        .build()?,
                 ])
                 .resources(
                     LinuxResourcesBuilder::default()
@@ -69,7 +72,11 @@ pub async fn save_config(
         )
         .build()?;
 
-    spec.save(layout_path.join("config.json"))?;
+    let config_path = layout_path.join("config.json");
+
+    let json_data = serde_json::to_string_pretty(&spec)?;
+
+    tokio::fs::write(config_path, json_data).await?;
 
     Ok(())
 }
