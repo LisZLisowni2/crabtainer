@@ -193,7 +193,9 @@ async fn main() {
             }
         }
         Commands::Ps => {
-            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             let container_dir = RustockerPaths::runtime_dir();
             println!(
                 "{:<15} {:<20} {:<20} {:<15}",
@@ -221,7 +223,9 @@ async fn main() {
             }
         }
         Commands::Stop { id } => {
-            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, &runtime_dir);
 
@@ -250,14 +254,16 @@ async fn main() {
                 config.status = ContainerStatus::Stopped;
 
                 std::fs::write(
-                    &runtime_dir.join("config.json"),
+                    runtime_dir.join("config.json"),
                     serde_json::to_string_pretty(&config).unwrap().as_bytes(),
                 )
                 .expect("[ERROR] Failed to write config");
             }
         }
         Commands::Rm { id } => {
-            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             if id != "." {
                 handle_deletion_of_container(id).await;
             } else {
@@ -314,18 +320,18 @@ async fn main() {
 async fn handle_deletion_of_container(id: String) {
     let runtime_dir = RustockerPaths::runtime_dir().join(&id);
 
-    if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
-        if let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content) {
-            if config.status == ContainerStatus::Active {
-                eprintln!("[ERROR] Active container cannot be deleted. Stop it first");
-                std::process::exit(1);
-            }
+    if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json"))
+        && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content)
+    {
+        if config.status == ContainerStatus::Active {
+            eprintln!("[ERROR] Active container cannot be deleted. Stop it first");
+            std::process::exit(1);
+        }
 
-            if let Err(e) = std::fs::remove_dir_all(&runtime_dir) {
-                eprintln!("[WARN] Failed to remove container dir: {}", e);
-            } else {
-                println!("{}", id);
-            }
+        if let Err(e) = std::fs::remove_dir_all(&runtime_dir) {
+            eprintln!("[WARN] Failed to remove container dir: {}", e);
+        } else {
+            println!("{}", id);
         }
     }
 }

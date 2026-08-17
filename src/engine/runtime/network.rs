@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use crate::engine::support::paths::RustockerPaths;
 
 pub struct NetworkManager {
     handle: Handle,
@@ -336,10 +335,10 @@ impl NetworkManager {
         container_pid: i32,
         ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Err(e) = fs::read_dir(format!("/proc/{}/ns/net", container_pid)) {
+        if fs::read_dir(format!("/proc/{}/ns/net", container_pid)).is_err() {
             return Ok(());
         }
-        
+
         let short_id = &container_id[..6.min(container_id.len())];
         let veth_host = format!("veth_{}", short_id);
         let veth_cont = format!("vethc_{}", short_id);

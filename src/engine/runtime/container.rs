@@ -127,7 +127,7 @@ pub async fn spawn_detach_container(
                 const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
                 let layout_dir = RustockerPaths::layout_store_dir().join(&opts.layout_name);
                 if !layout_dir.exists() {
-                    stderr.write(format!(
+                    stderr.write_all(format!(
                         "Layout '{}' doesn't exist! Build it first using 'rustocker build'.\n",
                         opts.layout_name
                     ).as_bytes()).expect("[HOST] Failed to write to error");
@@ -167,7 +167,7 @@ pub async fn spawn_detach_container(
                 let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
 
                 stdout
-                    .write(
+                    .write_all(
                         format!(
                             "[IPAM] Assigned IP for container {}: {}\n",
                             &container_id, assigned_ip
@@ -206,7 +206,7 @@ pub async fn spawn_detach_container(
                 .expect("[ERROR] Failed to mount overlayfs");
 
                 stdout
-                    .write(format!("[HOST] Starting container {}\n", container_id).as_bytes())
+                    .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
                     .unwrap();
 
                 let final_opts = crate::engine::runtime::options::ContainerReady {
@@ -539,7 +539,6 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
 
-
     let container_name = if let Some(name) = &opts.container_name {
         name.clone()
     } else {
@@ -707,8 +706,11 @@ fn child_process(
         return 1;
     }
 
-    fs::write("/etc/resolv.conf", "nameserver 1.1.1.1\nnameserver 8.8.8.8\n".as_bytes())
-        .expect("[ERROR] Failed to write resolv.conf file");
+    fs::write(
+        "/etc/resolv.conf",
+        "nameserver 1.1.1.1\nnameserver 8.8.8.8\n".as_bytes(),
+    )
+    .expect("[ERROR] Failed to write resolv.conf file");
 
     let proc_target = Path::new("/proc");
 
