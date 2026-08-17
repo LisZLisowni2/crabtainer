@@ -23,7 +23,10 @@ pub async fn build_layout(
     if std::fs::metadata(&output_path).is_ok() {
         println!("[WARN] Layout {} already exists!", output_layout_name);
     }
-    let _ = std::fs::create_dir_all(&output_path);
+
+    tokio::fs::create_dir_all(&output_path)
+        .await
+        .map_err(|e| format!("Failed to create layout dir: {}", e))?;
 
     let mut count = 0;
     let steps = rustocker.instructions.len();

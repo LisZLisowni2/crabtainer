@@ -6,6 +6,7 @@ use rtnetlink::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
@@ -221,7 +222,7 @@ impl NetworkManager {
         println!("[NETWORK] Setting iptables rules");
         self.add_iptables_rules(
             self.bridge_name.as_str(),
-            format!("{}/{}", self.gateway_ip, self.subnet_prefix).as_str(),
+            format!("172.19.0.0/{}", self.subnet_prefix).as_str(),
         )
         .await?;
 
@@ -237,7 +238,7 @@ impl NetworkManager {
 
         if !ipt.chain_exists("filter", "RUSTOCKER")? {
             ipt.new_chain("filter", "RUSTOCKER")?;
-            println!("[NETWORK] Created new ");
+            println!("[IPTABLES] Created new chain: RUSTOCKER");
         }
 
         let rule = format!("-s {} ! -o {} -j MASQUERADE", subnet_mask, bridge_name);
@@ -334,6 +335,10 @@ impl NetworkManager {
         container_pid: i32,
         ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if fs::read_dir(format!("/proc/{}/ns/net", container_pid)).is_err() {
+            return Ok(());
+        }
+
         let short_id = &container_id[..6.min(container_id.len())];
         let veth_host = format!("veth_{}", short_id);
         let veth_cont = format!("vethc_{}", short_id);
@@ -395,7 +400,6 @@ impl NetworkManager {
                 let thread_handle = std::thread::spawn(
                     move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         use nix::sched::{CloneFlags, setns};
-                        use std::fs::File;
 
                         setns(netns_fd, CloneFlags::CLONE_NEWNET)?;
 
@@ -407,63 +411,65 @@ impl NetworkManager {
                             let (conn, handle, _) = rtnetlink::new_connection().unwrap();
                             let conn_handle = tokio::spawn(conn);
 
-                            let setup_result: Result<(), Box<dyn std::error::Error + Send + Sync>> =
-                                async {
-                                    let mut links =
-                                        handle.link().get().match_name(veth_cont.clone()).execute();
-                                    let container_veth = links
-                                        .try_next()
-                                        .await?
-                                        .ok_or("[NETWORK] Veth not found in container")?;
-                                    let c_veth_id = container_veth.header.index;
+                            let _setup_result: Result<
+                                (),
+                                Box<dyn std::error::Error + Send + Sync>,
+                            > = async {
+                                let mut links =
+                                    handle.link().get().match_name(veth_cont.clone()).execute();
+                                let container_veth = links
+                                    .try_next()
+                                    .await?
+                                    .ok_or("[NETWORK] Veth not found in container")?;
+                                let c_veth_id = container_veth.header.index;
 
+                                handle
+                                    .link()
+                                    .set(
+                                        LinkMessageBuilder::<LinkUnspec>::default()
+                                            .index(c_veth_id)
+                                            .up()
+                                            .build(),
+                                    )
+                                    .execute()
+                                    .await?;
+
+                                handle
+                                    .address()
+                                    .add(c_veth_id, std::net::IpAddr::V4(ip), subnet_prefix)
+                                    .execute()
+                                    .await?;
+
+                                handle
+                                    .route()
+                                    .add(
+                                        RouteMessageBuilder::<Ipv4Addr>::default()
+                                            .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
+                                            .gateway(gateway_ip)
+                                            .output_interface(c_veth_id)
+                                            .build(),
+                                    )
+                                    .execute()
+                                    .await?;
+
+                                let mut lo_links =
+                                    handle.link().get().match_name("lo".to_string()).execute();
+                                if let Some(lo) = lo_links.try_next().await? {
                                     handle
                                         .link()
                                         .set(
                                             LinkMessageBuilder::<LinkUnspec>::default()
-                                                .index(c_veth_id)
+                                                .index(lo.header.index)
                                                 .up()
                                                 .build(),
                                         )
                                         .execute()
                                         .await?;
-
-                                    handle
-                                        .address()
-                                        .add(c_veth_id, std::net::IpAddr::V4(ip), subnet_prefix)
-                                        .execute()
-                                        .await?;
-
-                                    handle
-                                        .route()
-                                        .add(
-                                            RouteMessageBuilder::<Ipv4Addr>::default()
-                                                .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
-                                                .gateway(gateway_ip)
-                                                .output_interface(c_veth_id)
-                                                .build(),
-                                        )
-                                        .execute()
-                                        .await?;
-
-                                    let mut lo_links =
-                                        handle.link().get().match_name("lo".to_string()).execute();
-                                    if let Some(lo) = lo_links.try_next().await? {
-                                        handle
-                                            .link()
-                                            .set(
-                                                LinkMessageBuilder::<LinkUnspec>::default()
-                                                    .index(lo.header.index)
-                                                    .up()
-                                                    .build(),
-                                            )
-                                            .execute()
-                                            .await?;
-                                    }
-
-                                    Ok(())
                                 }
-                                .await;
+
+                                Ok(())
+                            }
+                            .await;
 
                             conn_handle.abort();
 
@@ -472,7 +478,7 @@ impl NetworkManager {
                     },
                 );
 
-                thread_handle
+                let _ = thread_handle
                     .join()
                     .map_err(|e| format!("[NETWORK] Failed to join thread: {:?}", e))?;
 

@@ -1,8 +1,8 @@
-use std::net::Ipv4Addr;
-use nix::unistd::Pid;
 use crate::engine::runtime::network::Ipam;
 use crate::engine::runtime::options::{ContainerStatus, RuntimeConfig};
 use crate::engine::support::paths::RustockerPaths;
+use nix::unistd::Pid;
+use std::net::Ipv4Addr;
 
 #[derive(Debug)]
 pub struct RefreshReport {
@@ -22,10 +22,10 @@ fn is_container_alive(pid: i32, saved_boot_id: Option<String>, current_boot_id: 
         return false;
     }
 
-    if let Some(boot_id) = saved_boot_id {
-        if boot_id != current_boot_id {
-            return false;
-        }
+    if let Some(boot_id) = saved_boot_id
+        && boot_id != current_boot_id
+    {
+        return false;
     }
 
     match nix::sys::signal::kill(Pid::from_raw(pid), None) {
@@ -69,7 +69,11 @@ pub async fn refresh_container_states() -> Result<RefreshReport, Box<dyn std::er
         };
 
         if config.status == ContainerStatus::Active {
-            let is_alive = is_container_alive(config.pid, Some(config.boot_id.clone()), current_boot_id.to_string());
+            let is_alive = is_container_alive(
+                config.pid,
+                Some(config.boot_id.clone()),
+                current_boot_id.to_string(),
+            );
 
             if !is_alive {
                 println!("[REFRESH] Detected a dead container. {}", name);
@@ -79,7 +83,10 @@ pub async fn refresh_container_states() -> Result<RefreshReport, Box<dyn std::er
                 let updated_json = serde_json::to_string_pretty(&config)?;
                 std::fs::write(&config_path, &updated_json)?;
 
-                if let Ok(ipam) = Ipam::new("172.19.0.1/16", RustockerPaths::base_dir().join("ipam.json")) {
+                if let Ok(ipam) = Ipam::new(
+                    "172.19.0.1/16",
+                    RustockerPaths::base_dir().join("ipam.json"),
+                ) {
                     let _ = ipam.release(&name.to_string()).await;
                     report.freed_ips.push(config.ip_address);
                 }
@@ -96,4 +103,3 @@ pub async fn refresh_container_states() -> Result<RefreshReport, Box<dyn std::er
 
     Ok(report)
 }
-

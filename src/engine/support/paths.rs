@@ -46,7 +46,10 @@ mod tests {
     #[test]
     fn base_dir_defaults_to_var_rustocker() {
         without_home(|| {
-            assert_eq!(RustockerPaths::base_dir(), PathBuf::from("/var/lib/rustocker"));
+            assert_eq!(
+                RustockerPaths::base_dir(),
+                PathBuf::from("/var/lib/rustocker")
+            );
         });
     }
 

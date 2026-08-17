@@ -1,19 +1,15 @@
-use std::borrow::Cow;
-use std::io::Error;
 use clap::{Parser, Subcommand};
-use nix::sched::CloneFlags;
+use getch_rs::Key;
 use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
-use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RuntimeConfig};
-use rustocker::engine::support::paths::RustockerPaths;
-use std::os::fd::{AsFd, AsRawFd};
-use std::path::{Path, PathBuf};
-use std::ptr::null;
-use getch_rs::Key;
-use walkdir::WalkDir;
 use rustocker::engine::runtime::exec::ExecOptions;
 use rustocker::engine::runtime::network::Ipam;
+use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RuntimeConfig};
 use rustocker::engine::runtime::stop::stop_container;
+use rustocker::engine::support::paths::RustockerPaths;
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "rustocker")]
@@ -78,14 +74,9 @@ enum Commands {
 
         cmd: String,
 
-        #[arg(
-            trailing_var_arg = true,
-            allow_hyphen_values = true,
-            requires = "cmd"
-        )]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, requires = "cmd")]
         args: Option<Vec<String>>,
     },
-    Refresh,
     Images,
     Layouts,
 }
@@ -141,7 +132,7 @@ async fn main() {
             build_layout(file, tag).await.unwrap();
         }
         Commands::Images => {
-            let store = rustocker::engine::support::paths::RustockerPaths::image_store_dir();
+            let store = RustockerPaths::image_store_dir();
             println!("{:<20} {:<15}", "ALIAS", "SIZE");
             println!("{}", "-".repeat(38));
             std::fs::read_dir(&store).ok();
@@ -172,7 +163,7 @@ async fn main() {
             }
         }
         Commands::Layouts => {
-            let store = rustocker::engine::support::paths::RustockerPaths::layout_store_dir();
+            let store = RustockerPaths::layout_store_dir();
             println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
             println!("{}", "-".repeat(38));
 
@@ -202,7 +193,9 @@ async fn main() {
             }
         }
         Commands::Ps => {
-            // rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             let container_dir = RustockerPaths::runtime_dir();
             println!(
                 "{:<15} {:<20} {:<20} {:<15}",
@@ -230,27 +223,47 @@ async fn main() {
             }
         }
         Commands::Stop { id } => {
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, &runtime_dir);
 
-            let config_str = std::fs::read_to_string(runtime_dir.join("config.json")).expect("[ERROR] Failed to read config");
-            let mut config = serde_json::from_str::<RuntimeConfig>(&config_str).expect("[ERROR] Failed to parse config");
+            let config_str = std::fs::read_to_string(runtime_dir.join("config.json"))
+                .expect("[ERROR] Failed to read config");
+            let mut config = serde_json::from_str::<RuntimeConfig>(&config_str)
+                .expect("[ERROR] Failed to parse config");
 
             if config.status == ContainerStatus::Active {
-                let ipam: Ipam = Ipam::new("172.19.0.0/16", RustockerPaths::base_dir().join("ipam.json")).unwrap();
+                let ipam: Ipam = Ipam::new(
+                    "172.19.0.0/16",
+                    RustockerPaths::base_dir().join("ipam.json"),
+                )
+                .unwrap();
 
-                stop_container(ipam, &id, target_pid, &runtime_dir, PathBuf::from("/sys/fs/cgroup"), &mut config).await.expect("[ERROR] Failed to stop container");
+                stop_container(
+                    ipam,
+                    &id,
+                    target_pid,
+                    &runtime_dir,
+                    PathBuf::from("/sys/fs/cgroup"),
+                    &mut config,
+                )
+                .await
+                .expect("[ERROR] Failed to stop container");
                 config.status = ContainerStatus::Stopped;
 
                 std::fs::write(
-                    &runtime_dir.join("config.json"),
-                    serde_json::to_string_pretty(&config)
-                        .unwrap()
-                        .as_bytes(),
-                ).expect("[ERROR] Failed to write config");
+                    runtime_dir.join("config.json"),
+                    serde_json::to_string_pretty(&config).unwrap().as_bytes(),
+                )
+                .expect("[ERROR] Failed to write config");
             }
         }
         Commands::Rm { id } => {
+            rustocker::engine::runtime::refresh::refresh_container_states()
+                .await
+                .expect("[ERROR] Failed to refresh container states");
             if id != "." {
                 handle_deletion_of_container(id).await;
             } else {
@@ -259,17 +272,15 @@ async fn main() {
 
                 loop {
                     match g.getch() {
-                        Ok(Key::Char('n')) => { break; }
+                        Ok(Key::Char('n')) => {
+                            break;
+                        }
                         Ok(Key::Char('y')) => {
                             if let Ok(dirs) = std::fs::read_dir(RustockerPaths::runtime_dir()) {
                                 for entry in dirs.flatten() {
                                     let path = entry.path();
-                                    let name = path
-                                        .file_name()
-                                        .unwrap()
-                                        .to_str()
-                                        .unwrap()
-                                        .to_string();
+                                    let name =
+                                        path.file_name().unwrap().to_str().unwrap().to_string();
 
                                     handle_deletion_of_container(name).await;
                                 }
@@ -287,24 +298,21 @@ async fn main() {
             interactive,
             tty,
             cmd,
-            args
+            args,
         } => {
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, runtime_dir);
-  
+
             let opts = ExecOptions {
                 interactive,
                 tty,
                 cmd,
-                args
+                args,
             };
 
             handle_exec(target_pid, id, opts)
                 .await
                 .expect("[ERROR] Failed to execute handle_exec");
-        }
-        Commands::Refresh => {
-            rustocker::engine::runtime::refresh::refresh_container_states().await.expect("[ERROR] Failed to refresh container states");
         }
     }
 }
@@ -312,24 +320,25 @@ async fn main() {
 async fn handle_deletion_of_container(id: String) {
     let runtime_dir = RustockerPaths::runtime_dir().join(&id);
 
-    if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json")) {
-        if let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content) {
-            if config.status == ContainerStatus::Active {
-                eprintln!("[ERROR] Active container cannot be deleted. Stop it first");
-                std::process::exit(1);
-            }
+    if let Ok(content) = std::fs::read_to_string(runtime_dir.join("config.json"))
+        && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content)
+    {
+        if config.status == ContainerStatus::Active {
+            eprintln!("[ERROR] Active container cannot be deleted. Stop it first");
+            std::process::exit(1);
+        }
 
-            if let Err(e) = std::fs::remove_dir_all(&runtime_dir) {
-                eprintln!("[WARN] Failed to remove container dir: {}", e);
-            } else {
-                println!("{}", id);
-            }
+        if let Err(e) = std::fs::remove_dir_all(&runtime_dir) {
+            eprintln!("[WARN] Failed to remove container dir: {}", e);
+        } else {
+            println!("{}", id);
         }
     }
 }
 
 fn find_pid<'a, P>(id: &String, container_dir: P) -> i32
-where P: Into<Cow<'a, Path>>
+where
+    P: Into<Cow<'a, Path>>,
 {
     let mut target_pid: i32 = 0;
 
@@ -345,14 +354,16 @@ where P: Into<Cow<'a, Path>>
     target_pid
 }
 
-pub async fn handle_exec(container_pid: i32, container_id: String, opts: ExecOptions) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_exec(
+    container_pid: i32,
+    container_id: String,
+    opts: ExecOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
     tokio::task::spawn_blocking(move || {
-        rustocker::engine::runtime::exec::exec_in_container(
-            container_pid,
-            container_id,
-            opts
-        ).expect("[ERROR] Failed to exec in container");
-    }).await?;
+        rustocker::engine::runtime::exec::exec_in_container(container_pid, container_id, opts)
+            .expect("[ERROR] Failed to exec in container");
+    })
+    .await?;
 
     Ok(())
 }
