@@ -82,6 +82,17 @@ enum Commands {
     },
     Images,
     Layouts,
+    System {
+        #[command(subcommand)]
+        action: SystemActions,
+    }
+}
+
+#[derive(Subcommand)]
+enum SystemActions {
+    Prune,
+    InitSystemd,
+    Autostart,
 }
 
 #[tokio::main]
@@ -318,6 +329,17 @@ async fn main() {
             handle_exec(target_pid, id, opts)
                 .await
                 .expect("[ERROR] Failed to execute handle_exec");
+        }
+        Commands::System { action } => {
+            match action {
+                SystemActions::Prune => {}
+                SystemActions::InitSystemd => {
+                    rustocker::engine::support::systemd::init_systemd_config().await.unwrap();
+                }
+                SystemActions::Autostart => {
+                    rustocker::engine::runtime::autostart::autostart_detached().await.unwrap();
+                }
+            }
         }
     }
 }

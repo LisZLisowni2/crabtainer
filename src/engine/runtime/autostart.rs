@@ -1,4 +1,5 @@
 use crate::engine::runtime::container::spawn_detach_container;
+use crate::engine::runtime::network::Ipam;
 use crate::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
 use crate::engine::support::paths::RustockerPaths;
 
@@ -9,9 +10,22 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    let ipam = Ipam::new(
+        "172.19.0.1/16",
+        RustockerPaths::base_dir().join("config.json"),
+    )?;
+
     for entry in runtime_dir.read_dir()? {
         let path = entry?.path();
         let config_path = path.join("config.json");
+
+        let container_id = path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let _ = ipam.release(&container_id);
 
         if !config_path.exists() {
             continue;
@@ -24,11 +38,6 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if config.is_detached && config.restart_policy == RestartPolicy::Always && config.status == ContainerStatus::Active {
-            let container_id = path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
 
             let opts: ContainerOptions = ContainerOptions {
                 layout_name: config.layout_name,

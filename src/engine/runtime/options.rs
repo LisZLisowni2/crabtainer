@@ -57,6 +57,5 @@ pub struct RuntimeConfig {
 pub enum RestartPolicy {
     #[default]
     Never,
-    OnFailure,
     Always
 }
