@@ -25,15 +25,5 @@ WantedBy=multi-user.target
 
     tokio::fs::write(&service_path, service_content.as_bytes()).await?;
 
-    let status = std::process::Command::new("systemctl")
-        .args(["start", service_path])
-        .status()?;
-
-    if status.success() {
-        println!("[SYSTEMD] Rustocker systemd autostart enabled successfully!");
-    } else {
-        eprintln!("[WARN] Failed to enable systemd service via systemctl.");
-    }
-
     Ok(())
 }
