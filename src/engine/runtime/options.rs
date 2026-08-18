@@ -44,9 +44,13 @@ pub struct RuntimeConfig {
     pub restart_policy: RestartPolicy,
     pub workdir: PathBuf,
     pub ip_address: Ipv4Addr,
+    pub memory_limit: i64,
+    pub cpu_limit: i64,
+    pub args: Vec<String>,
     pub pid: i32,
     pub boot_id: String,
     pub is_detached: bool,
+    pub rm: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, ValueEnum, PartialEq, Eq)]

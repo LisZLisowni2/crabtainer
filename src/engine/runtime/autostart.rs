@@ -1,4 +1,5 @@
-use crate::engine::runtime::options::{RestartPolicy, RuntimeConfig};
+use crate::engine::runtime::container::spawn_detach_container;
+use crate::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
 use crate::engine::support::paths::RustockerPaths;
 
 pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,26 +17,34 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        let content = std::fs::read_to_string(config_path)?;
-        let config: RuntimeConfig = match serde_json::from_str(&content) {
+        let runtime_config_content = std::fs::read_to_string(config_path)?;
+        let config: RuntimeConfig = match serde_json::from_str(&runtime_config_content) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
-        if config.is_detached && config.restart_policy == RestartPolicy::Always {
+        if config.is_detached && config.restart_policy == RestartPolicy::Always && config.status == ContainerStatus::Active {
             let container_id = path
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
 
-            if let Err(e) = restart_detached_container(container_id) {
+            let opts: ContainerOptions = ContainerOptions {
+                layout_name: config.layout_name,
+                container_name: Some(config.container_name),
+                restart_policy: config.restart_policy,
+                args: config.args,
+                cpu_limit: Some(config.cpu_limit as f64),
+                memory_limit: Some(config.memory_limit as f64),
+                rm: config.rm,
+            };
+
+            if let Err(e) = spawn_detach_container(opts, container_id).await {
                 eprintln!("[AUTOSTART] Failed to restart detached container: {}", e);
             }
         }
     }
-}
 
-async fn restart_detached_container(container_id: String) -> Result<(), Box<dyn std::error::Error>> {
-    
+    Ok(())
 }

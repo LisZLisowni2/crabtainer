@@ -211,7 +211,7 @@ pub async fn spawn_detach_container(
 
                 let final_opts = crate::engine::runtime::options::ContainerReady {
                     layout_name: opts.layout_name.clone(),
-                    args,
+                    args: args.clone(),
                     quota: Some(cpu_limit),
                     memory_limit: Some(memory_limit),
                     restart_policy: opts.restart_policy.clone()
@@ -274,6 +274,10 @@ pub async fn spawn_detach_container(
                     boot_id: save_boot_id(),
                     restart_policy: opts.restart_policy.clone(),
                     is_detached: true,
+                    cpu_limit,
+                    memory_limit,
+                    args: args.clone(),
+                    rm: opts.rm,
                 };
 
                 fs::write(
@@ -511,7 +515,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     let final_opts = crate::engine::runtime::options::ContainerReady {
         layout_name: opts.layout_name.clone(),
-        args,
+        args: args.clone(),
         quota: Some(cpu_limit),
         memory_limit: Some(memory_limit),
         restart_policy: opts.restart_policy.clone(),
@@ -564,6 +568,10 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         boot_id: save_boot_id(),
         restart_policy: opts.restart_policy.clone(),
         is_detached: false,
+        args: args.clone(),
+        cpu_limit,
+        memory_limit,
+        rm: opts.rm,
     };
 
     fs::write(
