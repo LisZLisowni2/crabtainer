@@ -4,7 +4,7 @@ use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
 use rustocker::engine::runtime::exec::ExecOptions;
 use rustocker::engine::runtime::network::Ipam;
-use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RuntimeConfig};
+use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
 use rustocker::engine::runtime::stop::stop_container;
 use rustocker::engine::support::paths::RustockerPaths;
 use std::borrow::Cow;
@@ -38,6 +38,9 @@ enum Commands {
 
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
+
+        #[arg(short, long, default_value_t, value_enum)]
+        restart: RestartPolicy,
 
         #[arg(short, long)]
         command: Option<String>,
@@ -96,6 +99,7 @@ async fn main() {
             args,
             cpu_limit,
             memory_limit,
+            restart,
             rm,
             name,
             detach,
@@ -117,6 +121,7 @@ async fn main() {
                 memory_limit,
                 container_name: name,
                 rm,
+                restart_policy: restart,
             };
 
             let container_id = rustocker::engine::runtime::container::generate_container_id();
@@ -385,6 +390,8 @@ mod tests {
             "-n",
             "MyContainer",
             "--rm",
+            "--restart",
+            "Always",
             "-d",
             "-C",
             "1.5",
@@ -402,6 +409,7 @@ mod tests {
                 name,
                 detach,
                 rm,
+                restart
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -411,6 +419,7 @@ mod tests {
                 assert_eq!(detach, true);
                 assert_eq!(name, Some("MyContainer".to_string()));
                 assert_eq!(rm, true);
+                assert_eq!(restart, RestartPolicy::Always);
             }
             _ => panic!("expected Run command"),
         }
@@ -428,6 +437,7 @@ mod tests {
                 args,
                 detach,
                 rm,
+                restart
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
@@ -437,6 +447,7 @@ mod tests {
                 assert_eq!(detach, false);
                 assert_eq!(name, None);
                 assert_eq!(rm, false);
+                assert_eq!(restart, RestartPolicy::Never);
             }
             _ => panic!("expected Run command"),
         }

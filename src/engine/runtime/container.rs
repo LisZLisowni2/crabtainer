@@ -214,6 +214,7 @@ pub async fn spawn_detach_container(
                     args,
                     quota: Some(cpu_limit),
                     memory_limit: Some(memory_limit),
+                    restart_policy: opts.restart_policy.clone()
                 };
 
                 let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -271,6 +272,8 @@ pub async fn spawn_detach_container(
                     workdir: PathBuf::from(cwd),
                     pid: child_pid.as_raw(),
                     boot_id: save_boot_id(),
+                    restart_policy: opts.restart_policy.clone(),
+                    is_detached: true,
                 };
 
                 fs::write(
@@ -511,6 +514,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         args,
         quota: Some(cpu_limit),
         memory_limit: Some(memory_limit),
+        restart_policy: opts.restart_policy.clone(),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -558,6 +562,8 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         workdir: PathBuf::from(cwd),
         pid: child_pid.as_raw(),
         boot_id: save_boot_id(),
+        restart_policy: opts.restart_policy.clone(),
+        is_detached: false,
     };
 
     fs::write(
