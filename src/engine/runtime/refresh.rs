@@ -77,7 +77,7 @@ pub async fn refresh_container_states() -> Result<RefreshReport, Box<dyn std::er
 
             if !is_alive {
                 println!("[REFRESH] Detected a dead container. {}", name);
-                config.status = ContainerStatus::Stopped;
+                config.status = ContainerStatus::Exited;
                 config.pid = 0;
 
                 let updated_json = serde_json::to_string_pretty(&config)?;

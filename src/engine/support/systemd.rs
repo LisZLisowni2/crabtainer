@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub async fn init_systemd_config() -> Result<(), Box<dyn std::error::Error>> {
     let service_path = "/etc/systemd/system/rustocker-autostart.service";
 

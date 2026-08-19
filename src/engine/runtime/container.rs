@@ -6,7 +6,7 @@ use crate::engine::support::paths::RustockerPaths;
 use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
-use nix::sys::signal::Signal;
+use nix::sys::signal::{Signal, sigaction, SaFlags, SigAction, SigHandler, SigSet};
 use nix::sys::stat::Mode;
 use nix::unistd::{
     ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, sethostname, setsid,
@@ -19,6 +19,10 @@ use std::io::Write;
 use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
+
+extern "C" fn handle_signal(_: i32) {
+    std::process::exit(0);
+}
 
 pub fn generate_container_id() -> String {
     let mut rng = rand::rng();
@@ -340,7 +344,7 @@ pub async fn spawn_detach_container(
                     };
 
                     tokio::task::spawn_blocking(move || {
-                        runtime_config.status = ContainerStatus::Stopped;
+                        runtime_config.status = ContainerStatus::Exited;
                         if let Ok(config) = serde_json::to_string_pretty(&runtime_config) {
                             let _ = fs::write(container_workdir.join("config.json"), config);
                         }
@@ -630,7 +634,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    runtime_config.status = ContainerStatus::Stopped;
+    runtime_config.status = ContainerStatus::Exited;
 
     fs::write(
         container_workdir.join("config.json"),
@@ -667,8 +671,18 @@ fn detach_child_process(
         std::process::exit(1);
     }
 
+    let sa = SigAction::new(
+        SigHandler::Handler(handle_signal),
+        SaFlags::SA_RESETHAND,
+        SigSet::empty(),
+    );
+
+    unsafe {
+        let _ = sigaction(Signal::SIGTERM, &sa);
+    }
+
     child_process(rootfs, container_id, options)
-}
+}   
 
 fn child_process(
     rootfs: &Path,

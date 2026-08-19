@@ -28,6 +28,7 @@ pub enum ContainerStatus {
     Active,
     Stopped,
     Exited,
+    Error,
 }
 
 impl std::fmt::Display for ContainerStatus {
@@ -57,5 +58,7 @@ pub struct RuntimeConfig {
 pub enum RestartPolicy {
     #[default]
     Never,
+    OnFailure,
+    UnlessStopped,
     Always
 }

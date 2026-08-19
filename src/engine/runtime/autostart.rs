@@ -25,7 +25,7 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
             .to_string_lossy()
             .to_string();
 
-        let _ = ipam.release(&container_id);
+        let _ = ipam.release(&container_id).await;
 
         if !config_path.exists() {
             continue;
@@ -37,8 +37,14 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
             Err(_) => continue,
         };
 
-        if config.is_detached && config.restart_policy == RestartPolicy::Always && config.status == ContainerStatus::Active {
+        let should_autostart = config.is_detached && match config.restart_policy {
+            RestartPolicy::Never => false,
+            RestartPolicy::Always => config.status != ContainerStatus::Stopped,
+            RestartPolicy::UnlessStopped => config.status != ContainerStatus::Stopped,
+            RestartPolicy::OnFailure => config.status == ContainerStatus::Error
+        };
 
+        if should_autostart {
             let opts: ContainerOptions = ContainerOptions {
                 layout_name: config.layout_name,
                 container_name: Some(config.container_name),

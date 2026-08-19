@@ -61,10 +61,10 @@ enum Commands {
     },
     Ps,
     Stop {
-        id: String,
+        name: String,
     },
     Rm {
-        id: String,
+        name: String,
     },
     Exec {
         #[arg(short, long, default_value_t = false)]
@@ -73,7 +73,7 @@ enum Commands {
         #[arg(short, long, default_value_t = false)]
         tty: bool,
 
-        id: String,
+        name: String,
 
         cmd: String,
 
@@ -238,10 +238,19 @@ async fn main() {
                 }
             }
         }
-        Commands::Stop { id } => {
+        Commands::Stop { name } => {
             rustocker::engine::runtime::refresh::refresh_container_states()
                 .await
                 .expect("[ERROR] Failed to refresh container states");
+            
+            let id = match search_id_by_name(name).await {
+                Some(id) => id,
+                None => {
+                    eprintln!("[WARN] Failed to find id for provided name");
+                    return;
+                }
+            };
+            
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, &runtime_dir);
 
@@ -276,14 +285,22 @@ async fn main() {
                 .expect("[ERROR] Failed to write config");
             }
         }
-        Commands::Rm { id } => {
+        Commands::Rm { name } => {
             rustocker::engine::runtime::refresh::refresh_container_states()
                 .await
                 .expect("[ERROR] Failed to refresh container states");
-            if id != "." {
+            
+            if name != "." {
+                let id = match search_id_by_name(name).await {
+                    Some(id) => id,
+                    None => {
+                        eprintln!("[WARN] Failed to find id for provided name");
+                        return;
+                    }
+                };
                 handle_deletion_of_container(id).await;
             } else {
-                print!("Are you sure to delete all stopped containers? [y/n]");
+                print!("Are you sure to delete all stopped and exited containers? [y/n]");
                 let g = getch_rs::Getch::new();
 
                 loop {
@@ -310,12 +327,20 @@ async fn main() {
             }
         }
         Commands::Exec {
-            id,
+            name,
             interactive,
             tty,
             cmd,
             args,
         } => {
+            let id = match search_id_by_name(name).await {
+                Some(id) => id,
+                None => {
+                    eprintln!("[WARN] Failed to find id for provided name");
+                    return;
+                }
+            };
+            
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, runtime_dir);
 
@@ -361,6 +386,27 @@ async fn handle_deletion_of_container(id: String) {
             println!("{}", id);
         }
     }
+}
+
+async fn search_id_by_name(name: String) -> Option<String> {
+    let runtime_dir = RustockerPaths::runtime_dir();
+    let entries = std::fs::read_dir(&runtime_dir).expect("[ERROR] Failed to read dir");
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        let config_content = std::fs::read_to_string(&path.join("config.json")).expect("[ERROR] Failed to read config");
+        let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
+            Ok(cfg) => cfg,
+            Err(_) => continue,
+        };
+
+        if config.container_name == name {
+            return Some(path.file_name().unwrap().to_str().unwrap().to_string());
+        }
+    }
+
+    None
 }
 
 fn find_pid<'a, P>(id: &String, container_dir: P) -> i32
