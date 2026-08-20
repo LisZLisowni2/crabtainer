@@ -1,6 +1,6 @@
-# Rustocker
+# Crabtainer
 
-Rustocker is the daemonless container engine written from scratch in Rust.
+Crabtainer is the daemonless container engine written from scratch in Rust.
 Objectives are to achive lightweight and fast image builder and runtime.
 
 ## Features
@@ -8,7 +8,7 @@ Objectives are to achive lightweight and fast image builder and runtime.
 - OCI compatible image specs
 - Own runtime program
 - Management of images and layouts (ready to use in containers)
-- Functional Rustockerfile and .rustockerignore
+- Functional Crabtainerfile and .crabtainergnore
 - CPU/memory limits via cgroups v2
 
 ## How to run
@@ -19,6 +19,7 @@ Objectives are to achive lightweight and fast image builder and runtime.
 - Rust toolchain
 - root/sudo privileges
 - linux namespaces & overlayfs support
+- systemd
 
 ### Building
 

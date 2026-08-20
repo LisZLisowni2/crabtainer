@@ -1,0 +1,13 @@
+DOWNLOAD python:3.14.7-alpine3.24 AS python
+
+FROM python
+
+# RUN mkdir test
+
+# COPY Crabtainerfile /
+# COPY Crabtainerfile /test/
+# COPY src/lib.rs /test/
+# COPY src /test/src/
+# COPY * /test/entire_base/
+
+RUN pip install pillow

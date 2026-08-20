@@ -1,0 +1,10 @@
+[package]
+name = "crabtainer_init"
+license = "Apache-2.0 OR MIT"
+version = "0.1.0"
+edition = "2024"
+authors = ["LisZLisowni2"]
+
+[dependencies]
+nix = { version = "0.31.3", features = ["signal", "sched"]}
+signal-hook = "0.4.4"

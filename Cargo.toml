@@ -1,6 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["crates/rustocker", "crates/rustocker_init"]
+members = ["crates/crabtainer", "crates/crabtainer_init"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+panic = "abort"
 
 [workspace.package]
 license = "Apache-2.0 OR MIT"

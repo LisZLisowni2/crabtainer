@@ -1,6 +1,6 @@
-# Contributing to rustocker
+# Contributing to crabtainer
 
-First off, thank you for considering contributing to **rustocker**! Community contributions help make this project better for everyone.
+First off, thank you for considering contributing to **crabtainer**! Community contributions help make this project better for everyone.
 
 As a solo maintainer project, following these guidelines helps me review and merge your pull requests as quickly as possible.
 

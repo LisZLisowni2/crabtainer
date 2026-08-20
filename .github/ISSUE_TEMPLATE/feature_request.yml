@@ -1,19 +1,19 @@
 name: Feature Request
-description: Suggest an idea or enhancement for rustocker.
+description: Suggest an idea or enhancement for crabtainer.
 title: "[FEATURE]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping make **rustocker** better! Please fill out the sections below to help explain your idea.
+        Thanks for helping make **crabtainer** better! Please fill out the sections below to help explain your idea.
 
   - type: textarea
     id: problem
     attributes:
       label: Is your feature request related to a problem?
       description: A clear description of what the problem is (e.g., "I'm frustrated when...")
-      placeholder: e.g., Currently, rustocker doesn't support authenticating with private registries via token...
+      placeholder: e.g., Currently, crabtainer doesn't support authenticating with private registries via token...
     validations:
       required: true
 
