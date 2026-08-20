@@ -14,6 +14,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart={} system autostart
+KillMode=mixed
+TimeoutStopSec=10s
 
 [Install]
 WantedBy=multi-user.target

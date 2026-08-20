@@ -29,7 +29,7 @@ cargo build --release
 ### Running
 
 ```bash
-sudo ./target/release/rustocker
+sudo ./target/release/core
 ```
 
 ## LICENSE
