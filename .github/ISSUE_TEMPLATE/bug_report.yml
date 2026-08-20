@@ -1,5 +1,5 @@
 name: Bug Report
-description: Create a report to help us reproduce and fix a bug in rustocker.
+description: Create a report to help us reproduce and fix a bug in crabtainer.
 title: "[BUG]: "
 labels: ["bug"]
 body:
@@ -15,7 +15,7 @@ body:
     attributes:
       label: Bug Description
       description: A clear and concise description of what the bug is.
-      placeholder: e.g., rustocker panics when pulling a multi-architecture image...
+      placeholder: e.g., crabtainer panics when pulling a multi-architecture image...
     validations:
       required: true
 

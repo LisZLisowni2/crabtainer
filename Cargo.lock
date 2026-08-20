@@ -337,6 +337,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "crabtainer"
+version = "0.3.2"
+dependencies = [
+ "clap",
+ "crossterm",
+ "flate2",
+ "futures",
+ "getch-rs",
+ "glob",
+ "globset",
+ "ipnet",
+ "iptables",
+ "is-root",
+ "nix 0.31.3",
+ "oci-client",
+ "oci-spec 0.10.0",
+ "rand",
+ "rtnetlink",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "walkdir",
+]
+
+[[package]]
+name = "crabtainer_init"
+version = "0.1.0"
+dependencies = [
+ "nix 0.31.3",
+ "signal-hook 0.4.4",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1791,42 +1827,6 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted 0.9.0",
-]
-
-[[package]]
-name = "rustocker"
-version = "0.3.2"
-dependencies = [
- "clap",
- "crossterm",
- "flate2",
- "futures",
- "getch-rs",
- "glob",
- "globset",
- "ipnet",
- "iptables",
- "is-root",
- "nix 0.31.3",
- "oci-client",
- "oci-spec 0.10.0",
- "rand",
- "rtnetlink",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "thiserror",
- "tokio",
- "walkdir",
-]
-
-[[package]]
-name = "rustocker_init"
-version = "0.1.0"
-dependencies = [
- "nix 0.31.3",
- "signal-hook 0.4.4",
 ]
 
 [[package]]
