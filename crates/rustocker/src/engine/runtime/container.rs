@@ -206,6 +206,23 @@ pub async fn spawn_detach_container(
                 )
                 .expect("[ERROR] Failed to mount overlayfs");
 
+                // Volumes & bind mounts
+                let container_init_path = merged_rootfs.join("dev/.rustocker_init");
+                let container_init_localization = std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("rustocker_init");
+                fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.rustocker_init");
+
+                mount(
+                    Some(container_init_localization.to_str().unwrap()),
+                    &container_init_path,
+                    None::<&str>,
+                    MsFlags::MS_BIND | MsFlags::MS_RDONLY,
+                    None::<&str>,
+                ).expect("[ERROR] Failed to mount init program");
+
                 stdout
                     .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
                     .unwrap();
@@ -512,6 +529,23 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     )
     .expect("[ERROR] Failed to mount overlayfs");
 
+    // Volumes & bind mounts
+    let container_init_path = merged_rootfs.join("dev/.rustocker_init");
+    let container_init_localization = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("rustocker_init");
+    fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.rustocker_init");
+
+    mount(
+        Some(container_init_localization.to_str().unwrap()),
+        &container_init_path,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_RDONLY,
+        None::<&str>,
+    ).expect("[ERROR] Failed to mount init program");
+
     println!("[HOST] Starting container {}", container_id);
 
     let final_opts = crate::engine::runtime::options::ContainerReady {
@@ -754,15 +788,19 @@ fn child_process(
         std::process::exit(1);
     }
 
-    let cmd_cstring: CString = CString::new(options.args[0].clone()).unwrap();
-    let args_cstring: Vec<CString> = options
-        .args
-        .iter()
-        .map(|arg| {
-            CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString")
-        })
-        .collect();
+    let cmd_cstring: CString = CString::new("/dev/.rustocker_init").unwrap();
+    let mut args_cstring: Vec<CString> = vec![cmd_cstring.clone()];
 
+    args_cstring.extend(
+        options
+            .args
+            .iter()
+            .map(|arg| {
+                CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString")
+            })
+            .collect::<Vec<CString>>()
+    );
+    
     match execvp(&cmd_cstring, &args_cstring) {
         Ok(_) => unreachable!(),
         Err(e) => {

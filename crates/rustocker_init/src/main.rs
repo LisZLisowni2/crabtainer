@@ -14,7 +14,7 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let mut child = match Command::new(&args[1])
+    let child = match Command::new(&args[1])
         .args(&args[2..])
         .spawn() {
         Ok(child) => child,
