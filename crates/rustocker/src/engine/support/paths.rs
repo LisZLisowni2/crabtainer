@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn init_system_dirs_creates_all_dirs() {
-        let home = std::env::temp_dir().join("rustocker-test-init");
+        let home = std::env::temp_dir().join("rustocker-test-rustocker_init");
         with_home(home.to_str().unwrap(), || {
             RustockerPaths::init_system_dirs().unwrap();
             assert!(RustockerPaths::image_store_dir().is_dir());

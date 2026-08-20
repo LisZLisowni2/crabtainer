@@ -14,3 +14,4 @@ pub mod network;
 pub mod options;
 pub mod refresh;
 pub mod stop;
+pub mod autostart;

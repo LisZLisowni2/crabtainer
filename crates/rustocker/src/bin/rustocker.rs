@@ -4,7 +4,7 @@ use rustocker::engine::build::builder::build_layout;
 use rustocker::engine::runtime::container::{run_container, spawn_detach_container};
 use rustocker::engine::runtime::exec::ExecOptions;
 use rustocker::engine::runtime::network::Ipam;
-use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RuntimeConfig};
+use rustocker::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
 use rustocker::engine::runtime::stop::stop_container;
 use rustocker::engine::support::paths::RustockerPaths;
 use std::borrow::Cow;
@@ -39,6 +39,9 @@ enum Commands {
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
+        #[arg(short, long, default_value_t, value_enum)]
+        restart: RestartPolicy,
+
         #[arg(short, long)]
         command: Option<String>,
 
@@ -58,10 +61,10 @@ enum Commands {
     },
     Ps,
     Stop {
-        id: String,
+        name: String,
     },
     Rm {
-        id: String,
+        name: String,
     },
     Exec {
         #[arg(short, long, default_value_t = false)]
@@ -70,7 +73,7 @@ enum Commands {
         #[arg(short, long, default_value_t = false)]
         tty: bool,
 
-        id: String,
+        name: String,
 
         cmd: String,
 
@@ -79,6 +82,17 @@ enum Commands {
     },
     Images,
     Layouts,
+    System {
+        #[command(subcommand)]
+        action: SystemActions,
+    }
+}
+
+#[derive(Subcommand)]
+enum SystemActions {
+    Prune,
+    InitSystemd,
+    Autostart,
 }
 
 #[tokio::main]
@@ -96,6 +110,7 @@ async fn main() {
             args,
             cpu_limit,
             memory_limit,
+            restart,
             rm,
             name,
             detach,
@@ -117,6 +132,7 @@ async fn main() {
                 memory_limit,
                 container_name: name,
                 rm,
+                restart_policy: restart,
             };
 
             let container_id = rustocker::engine::runtime::container::generate_container_id();
@@ -222,10 +238,19 @@ async fn main() {
                 }
             }
         }
-        Commands::Stop { id } => {
+        Commands::Stop { name } => {
             rustocker::engine::runtime::refresh::refresh_container_states()
                 .await
                 .expect("[ERROR] Failed to refresh container states");
+            
+            let id = match search_id_by_name(name).await {
+                Some(id) => id,
+                None => {
+                    eprintln!("[WARN] Failed to find id for provided name");
+                    return;
+                }
+            };
+            
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, &runtime_dir);
 
@@ -260,14 +285,22 @@ async fn main() {
                 .expect("[ERROR] Failed to write config");
             }
         }
-        Commands::Rm { id } => {
+        Commands::Rm { name } => {
             rustocker::engine::runtime::refresh::refresh_container_states()
                 .await
                 .expect("[ERROR] Failed to refresh container states");
-            if id != "." {
+            
+            if name != "." {
+                let id = match search_id_by_name(name).await {
+                    Some(id) => id,
+                    None => {
+                        eprintln!("[WARN] Failed to find id for provided name");
+                        return;
+                    }
+                };
                 handle_deletion_of_container(id).await;
             } else {
-                print!("Are you sure to delete all stopped containers? [y/n]");
+                print!("Are you sure to delete all stopped and exited containers? [y/n]");
                 let g = getch_rs::Getch::new();
 
                 loop {
@@ -294,12 +327,20 @@ async fn main() {
             }
         }
         Commands::Exec {
-            id,
+            name,
             interactive,
             tty,
             cmd,
             args,
         } => {
+            let id = match search_id_by_name(name).await {
+                Some(id) => id,
+                None => {
+                    eprintln!("[WARN] Failed to find id for provided name");
+                    return;
+                }
+            };
+            
             let runtime_dir = RustockerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, runtime_dir);
 
@@ -313,6 +354,17 @@ async fn main() {
             handle_exec(target_pid, id, opts)
                 .await
                 .expect("[ERROR] Failed to execute handle_exec");
+        }
+        Commands::System { action } => {
+            match action {
+                SystemActions::Prune => {}
+                SystemActions::InitSystemd => {
+                    rustocker::engine::support::systemd::init_systemd_config().await.unwrap();
+                }
+                SystemActions::Autostart => {
+                    rustocker::engine::runtime::autostart::autostart_detached().await.unwrap();
+                }
+            }
         }
     }
 }
@@ -334,6 +386,27 @@ async fn handle_deletion_of_container(id: String) {
             println!("{}", id);
         }
     }
+}
+
+async fn search_id_by_name(name: String) -> Option<String> {
+    let runtime_dir = RustockerPaths::runtime_dir();
+    let entries = std::fs::read_dir(&runtime_dir).expect("[ERROR] Failed to read dir");
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        let config_content = std::fs::read_to_string(&path.join("config.json")).expect("[ERROR] Failed to read config");
+        let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
+            Ok(cfg) => cfg,
+            Err(_) => continue,
+        };
+
+        if config.container_name == name {
+            return Some(path.file_name().unwrap().to_str().unwrap().to_string());
+        }
+    }
+
+    None
 }
 
 fn find_pid<'a, P>(id: &String, container_dir: P) -> i32
@@ -385,6 +458,8 @@ mod tests {
             "-n",
             "MyContainer",
             "--rm",
+            "-r",
+            "always",
             "-d",
             "-C",
             "1.5",
@@ -402,6 +477,7 @@ mod tests {
                 name,
                 detach,
                 rm,
+                restart
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -411,6 +487,7 @@ mod tests {
                 assert_eq!(detach, true);
                 assert_eq!(name, Some("MyContainer".to_string()));
                 assert_eq!(rm, true);
+                assert_eq!(restart, RestartPolicy::Always);
             }
             _ => panic!("expected Run command"),
         }
@@ -428,6 +505,7 @@ mod tests {
                 args,
                 detach,
                 rm,
+                restart
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
@@ -437,6 +515,7 @@ mod tests {
                 assert_eq!(detach, false);
                 assert_eq!(name, None);
                 assert_eq!(rm, false);
+                assert_eq!(restart, RestartPolicy::Never);
             }
             _ => panic!("expected Run command"),
         }

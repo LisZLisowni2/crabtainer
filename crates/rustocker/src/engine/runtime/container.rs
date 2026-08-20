@@ -6,7 +6,7 @@ use crate::engine::support::paths::RustockerPaths;
 use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
-use nix::sys::signal::Signal;
+use nix::sys::signal::{Signal};
 use nix::sys::stat::Mode;
 use nix::unistd::{
     ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, sethostname, setsid,
@@ -87,6 +87,7 @@ pub async fn spawn_detach_container(
                 let pid_file = runtime_path.join("pid");
                 fs::write(pid_file, child.as_raw().to_string().as_bytes()).unwrap();
                 println!("[HOST] PID file written to file. {}", child);
+                return Ok(());
             }
             ForkResult::Child => {
                 setsid().expect("[HOST] Failed to setsid");
@@ -205,15 +206,33 @@ pub async fn spawn_detach_container(
                 )
                 .expect("[ERROR] Failed to mount overlayfs");
 
+                // Volumes & bind mounts
+                let container_init_path = merged_rootfs.join("dev/.rustocker_init");
+                let container_init_localization = std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("rustocker_init");
+                fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.rustocker_init");
+
+                mount(
+                    Some(container_init_localization.to_str().unwrap()),
+                    &container_init_path,
+                    None::<&str>,
+                    MsFlags::MS_BIND | MsFlags::MS_RDONLY,
+                    None::<&str>,
+                ).expect("[ERROR] Failed to mount init program");
+
                 stdout
                     .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
                     .unwrap();
 
                 let final_opts = crate::engine::runtime::options::ContainerReady {
                     layout_name: opts.layout_name.clone(),
-                    args,
+                    args: args.clone(),
                     quota: Some(cpu_limit),
                     memory_limit: Some(memory_limit),
+                    restart_policy: opts.restart_policy.clone()
                 };
 
                 let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -271,6 +290,12 @@ pub async fn spawn_detach_container(
                     workdir: PathBuf::from(cwd),
                     pid: child_pid.as_raw(),
                     boot_id: save_boot_id(),
+                    restart_policy: opts.restart_policy.clone(),
+                    is_detached: true,
+                    cpu_limit,
+                    memory_limit,
+                    args: args.clone(),
+                    rm: opts.rm,
                 };
 
                 fs::write(
@@ -333,7 +358,7 @@ pub async fn spawn_detach_container(
                     };
 
                     tokio::task::spawn_blocking(move || {
-                        runtime_config.status = ContainerStatus::Stopped;
+                        runtime_config.status = ContainerStatus::Exited;
                         if let Ok(config) = serde_json::to_string_pretty(&runtime_config) {
                             let _ = fs::write(container_workdir.join("config.json"), config);
                         }
@@ -504,13 +529,31 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     )
     .expect("[ERROR] Failed to mount overlayfs");
 
+    // Volumes & bind mounts
+    let container_init_path = merged_rootfs.join("dev/.rustocker_init");
+    let container_init_localization = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("rustocker_init");
+    fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.rustocker_init");
+
+    mount(
+        Some(container_init_localization.to_str().unwrap()),
+        &container_init_path,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_RDONLY,
+        None::<&str>,
+    ).expect("[ERROR] Failed to mount init program");
+
     println!("[HOST] Starting container {}", container_id);
 
     let final_opts = crate::engine::runtime::options::ContainerReady {
         layout_name: opts.layout_name.clone(),
-        args,
+        args: args.clone(),
         quota: Some(cpu_limit),
         memory_limit: Some(memory_limit),
+        restart_policy: opts.restart_policy.clone(),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -558,6 +601,12 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         workdir: PathBuf::from(cwd),
         pid: child_pid.as_raw(),
         boot_id: save_boot_id(),
+        restart_policy: opts.restart_policy.clone(),
+        is_detached: false,
+        args: args.clone(),
+        cpu_limit,
+        memory_limit,
+        rm: opts.rm,
     };
 
     fs::write(
@@ -616,7 +665,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    runtime_config.status = ContainerStatus::Stopped;
+    runtime_config.status = ContainerStatus::Exited;
 
     fs::write(
         container_workdir.join("config.json"),
@@ -739,15 +788,19 @@ fn child_process(
         std::process::exit(1);
     }
 
-    let cmd_cstring: CString = CString::new(options.args[0].clone()).unwrap();
-    let args_cstring: Vec<CString> = options
-        .args
-        .iter()
-        .map(|arg| {
-            CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString")
-        })
-        .collect();
+    let cmd_cstring: CString = CString::new("/dev/.rustocker_init").unwrap();
+    let mut args_cstring: Vec<CString> = vec![cmd_cstring.clone()];
 
+    args_cstring.extend(
+        options
+            .args
+            .iter()
+            .map(|arg| {
+                CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString")
+            })
+            .collect::<Vec<CString>>()
+    );
+    
     match execvp(&cmd_cstring, &args_cstring) {
         Ok(_) => unreachable!(),
         Err(e) => {
