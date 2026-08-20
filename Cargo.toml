@@ -13,7 +13,12 @@ lto = true
 panic = "abort"
 
 [workspace.package]
-license = "Apache-2.0 OR MIT"
-version = "0.1.0"
+license = "Apache-2.0"
+version = "0.3.2"
 edition = "2024"
 authors = ["LisZLisowni2"]
+repository = "https://github.com/LisZLisowni2/crabtainer"
+description = "A lightweight daemonless container engine built from scratch in Rust"
+readme = "README.md"
+keywords = ["container", "oci", "namespaces", "cgroups", "docker"]
+categories = ["command-line-utilities", "os::unix-apis"]
