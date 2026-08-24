@@ -12,7 +12,7 @@ pub struct CrabtainerIgnore {
 impl CrabtainerIgnore {
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref().to_path_buf();
-        let ignore_file = root.join("../../../../../../.crabtainerignore");
+        let ignore_file = root.join(".crabtainerignore");
         let mut rules = Vec::new();
 
         if let Ok(content) = fs::read_to_string(&ignore_file) {
@@ -57,7 +57,7 @@ impl CrabtainerIgnore {
     }
 
     pub fn is_ignored(&self, relative_path: &Path) -> bool {
-        if relative_path == Path::new("../../../../../../.crabtainerignore") {
+        if relative_path == Path::new(".crabtainerignore") {
             return true;
         }
 
@@ -116,8 +116,8 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
     }
 
     let mut ignore: Vec<String> = Vec::new();
-    if fs::metadata("../../../../../../.crabtainerignore").is_ok() {
-        let splited: Vec<String> = fs::read_to_string("../../../../../../.crabtainerignore")
+    if fs::metadata(".crabtainerignore").is_ok() {
+        let splited: Vec<String> = fs::read_to_string(".crabtainerignore")
             .expect(" => [COPY] Failed to open .crabtainerignore")
             .split("\n")
             .map(|s| s.to_string())
@@ -232,7 +232,7 @@ mod tests {
     }
 
     fn ignore_with(root: &Path, rules: &str) -> CrabtainerIgnore {
-        fs::write(root.join("../../../../../../.crabtainerignore"), rules).unwrap();
+        fs::write(root.join(".crabtainerignore"), rules).unwrap();
         CrabtainerIgnore::new(root)
     }
 
@@ -264,7 +264,7 @@ mod tests {
     fn crabtainerignore_itself_excluded_even_without_rules() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");
-        fs::write(dir.path().join("../../../../../../.crabtainerignore"), "").unwrap();
+        fs::write(dir.path().join(".crabtainerignore"), "").unwrap();
 
         let ig = CrabtainerIgnore::new(dir.path());
         assert_eq!(collected(dir.path(), &ig), vec![PathBuf::from("a.txt")]);

@@ -19,7 +19,7 @@ Objectives are to achive lightweight and fast image builder and runtime.
 - Rust toolchain
 - root/sudo privileges
 - linux namespaces & overlayfs support
-- systemd
+- systemd (optional, only for autostart script)
 
 ### Building
 

@@ -23,7 +23,7 @@ pub async fn save_config(
         period
     };
 
-    let memory = opts.memory_limit.unwrap_or(f64::MAX);
+    let memory = opts.memory_limit.unwrap_or(1024f64 * 1024f64 * 1024f64); // 1GB Default
 
     let spec = SpecBuilder::default()
         .root(

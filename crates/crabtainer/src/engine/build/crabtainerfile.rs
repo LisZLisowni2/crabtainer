@@ -331,7 +331,7 @@ CMD /bin/sh -c
     #[test]
     fn parse_from_file_reads_disk() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("../../../../../Crabtainerfile");
+        let path = dir.path().join("Crabtainerfile");
         std::fs::write(&path, "FROM ubuntu\n").unwrap();
 
         let parsed = Crabtainerfile::parse_from_file(&path).unwrap();

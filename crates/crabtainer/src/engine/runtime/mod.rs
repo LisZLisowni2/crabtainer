@@ -15,3 +15,4 @@ pub mod options;
 pub mod refresh;
 pub mod stop;
 pub mod autostart;
+pub mod start;
