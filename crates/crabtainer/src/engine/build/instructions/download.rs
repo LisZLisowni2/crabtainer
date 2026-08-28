@@ -12,19 +12,19 @@ pub async fn download_image_if_missing(
 
     let reference: oci_client::Reference = image_ref
         .parse()
-        .map_err(|e| format!(" => [DOWNLOAD] Invalid image reference: {}", e))?;
+        .map_err(|e| format!(" => [ERROR] [DOWNLOAD] Invalid image reference: {}", e))?;
 
     let image_dir = CrabtainerPaths::image_store_dir().join(alias);
 
     std::fs::create_dir_all(&image_dir)
-        .map_err(|e| format!("=> [DOWNLOAD] Failed to create image directory: {}", e))?;
+        .map_err(|e| format!("=> [ERROR] [DOWNLOAD] Failed to create image directory: {}", e))?;
 
-    println!(" => [DOWNLOAD] Connecting to registry for {}...", image_ref);
+    println!(" => [INFO] [DOWNLOAD] Connecting to registry for {}...", image_ref);
 
     let client = Client::new(ClientConfig::default());
     let auth = RegistryAuth::Anonymous;
 
-    println!(" => [DOWNLOAD] Fetching manifest...");
+    println!(" => [INFO] [DOWNLOAD] Fetching manifest...");
     let (manifest, _digest, config_json) = client
         .pull_manifest_and_config(&reference, &auth)
         .await
@@ -33,7 +33,7 @@ pub async fn download_image_if_missing(
     std::fs::write(image_dir.join("config.json"), config_json)
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
-    println!(" => [DOWNLOAD] Pulling {} layers...", manifest.layers.len());
+    println!(" => [INFO] [DOWNLOAD] Pulling {} layers...", manifest.layers.len());
     for (i, layer) in manifest.layers.iter().enumerate() {
         let layer_filename = format!("layer_{}.tar.gz", i);
         let layer_path = image_dir.join(&layer_filename);
@@ -47,21 +47,21 @@ pub async fn download_image_if_missing(
 
         let mut layer_file = File::create(layer_path)
             .await
-            .map_err(|e| format!("Failed to create layer file: {}", e))?;
+            .map_err(|e| format!("[ERROR] [DOWNLOAD] Failed to create layer file: {}", e))?;
 
         client
             .pull_blob(&reference, &*layer.digest, &mut layer_file)
             .await
-            .map_err(|e| format!("Failed to pull layer blob: {}", e))?;
+            .map_err(|e| format!("[ERROR] [DOWNLOAD] Failed to pull layer blob: {}", e))?;
 
         layer_file
             .flush()
             .await
-            .map_err(|e| format!("Failed to flush layer: {}", e))?;
+            .map_err(|e| format!("[ERROR] [DOWNLOAD] Failed to flush layer: {}", e))?;
     }
 
     println!(
-        " => [DOWNLOAD] Image '{}' successfully fetched and stored!",
+        " => [INFO] [DOWNLOAD] Image '{}' successfully fetched and stored!",
         alias
     );
     Ok(image_dir)
