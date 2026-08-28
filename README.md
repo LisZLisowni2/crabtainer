@@ -10,6 +10,7 @@ Objectives are to achive lightweight and fast image builder and runtime.
 - Management of images and layouts (ready to use in containers)
 - Functional Crabtainerfile and .crabtainergnore
 - CPU/memory limits via cgroups v2
+- Complete isolation of containers from host
 
 ## How to run
 
