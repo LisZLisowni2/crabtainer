@@ -23,7 +23,7 @@ pub async fn save_config(
         period
     };
 
-    let memory = opts.memory_limit.unwrap_or(f64::MAX);
+    let memory = opts.memory_limit.unwrap_or(1024f64 * 1024f64 * 1024f64); // 1GB Default
 
     let spec = SpecBuilder::default()
         .root(
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(resources.cpu().as_ref().unwrap().quota(), Some(100000));
         assert_eq!(resources.cpu().as_ref().unwrap().period(), Some(100000));
-        assert_eq!(resources.memory().as_ref().unwrap().limit(), Some(i64::MAX));
+        assert_eq!(resources.memory().as_ref().unwrap().limit(), Some(1073741824));
         assert!(
             spec.process()
                 .as_ref()

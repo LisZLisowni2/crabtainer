@@ -26,7 +26,7 @@ fn main() -> ExitCode {
 
     let target_pid = Pid::from_raw(child.id() as i32);
 
-    let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Failed to register signals");
+    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("Failed to register signals");
     std::thread::spawn(move || {
         for sig in signals.forever() {
             let signal = match sig {

@@ -1,6 +1,6 @@
-DOWNLOAD python:3.14.7-alpine3.24 AS python
+DOWNLOAD gentoo/stage3:20260817 AS gentoo
 
-FROM python
+FROM gentoo
 
 # RUN mkdir test
 
@@ -9,5 +9,3 @@ FROM python
 # COPY src/lib.rs /test/
 # COPY src /test/src/
 # COPY * /test/entire_base/
-
-RUN pip install pillow

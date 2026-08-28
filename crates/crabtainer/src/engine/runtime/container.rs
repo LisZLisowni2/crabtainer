@@ -335,7 +335,7 @@ pub async fn spawn_detach_container(
 
                 let container_workdir_clone = container_workdir.clone();
 
-                rt.block_on(async move {
+                let exit_code = rt.block_on(async move {
                     let wait_result = tokio::task::spawn_blocking(move || {
                         nix::sys::wait::waitpid(child_pid, None)
                     })
@@ -358,11 +358,6 @@ pub async fn spawn_detach_container(
                     };
 
                     tokio::task::spawn_blocking(move || {
-                        runtime_config.status = ContainerStatus::Exited;
-                        if let Ok(config) = serde_json::to_string_pretty(&runtime_config) {
-                            let _ = fs::write(container_workdir.join("config.json"), config);
-                        }
-
                         if let Err(e) = fs::remove_dir(&cgroup_dir) {
                             eprintln!("[WARN] Error during cgroup deletion: {}", e);
                         }
@@ -401,19 +396,34 @@ pub async fn spawn_detach_container(
                     }
 
                     if let Ok(code) = exit_status {
-                        if code != 0 {
+                        if code != 0 && code != 143 {
                             return Err(format!(
                                 "Container process exited with exit code: {}",
                                 code
                             ));
                         }
+
+                        return Ok(code);
                     } else {
                         exit_status?;
                     }
 
-                    Ok(())
-                })
-                .unwrap();
+                    Ok(0)
+                });
+
+                if let Err(_) = exit_code {
+                    runtime_config.status = ContainerStatus::Error;
+                } else if let Ok(code) = exit_code {
+                    if code == 143 {
+                        runtime_config.status = ContainerStatus::Stopped;
+                    } else {
+                        runtime_config.status = ContainerStatus::Exited;
+                    }
+                }
+
+                if let Ok(config) = serde_json::to_string_pretty(&runtime_config) {
+                    let _ = fs::write(container_workdir_clone.join("config.json"), config);
+                }
 
                 dup2_stdout(&saved_stdout).expect("[ERROR] Failed to restore stdout");
                 dup2_stderr(&saved_stderr).expect("[ERROR] Failed to restore stderr");
@@ -617,29 +627,33 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     )
     .unwrap();
 
-    network_manager
+    if let Err(e) = network_manager
         .attach_container(container_id.as_str(), child_pid.as_raw(), assigned_ip)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string()) {
+        eprintln!("[WARN] Failed to attach network: {}", e);
+    }
 
-    tokio::task::spawn_blocking(move || match nix::sys::wait::waitpid(child_pid, None) {
+    let is_error = tokio::task::spawn_blocking(move || match nix::sys::wait::waitpid(child_pid, None) {
         Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
             println!("[INFO] Container exited with code {}", status);
             if status != 0 {
-                return Err(format!(
-                    "Container process failed with exit code: {}",
-                    status
-                ));
+                eprintln!(
+                    "[INFO] Container process failed with exit code: {}",
+                    status,
+                );
+                Ok(true)
+            } else {
+                Ok(false)
             }
-
-            Ok(())
         }
         Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
-            Err(format!("Container process exited with signal {:?}", sig))
+            eprintln!("Container process exited with signal {:?}", sig);
+            Ok(true)
         }
         Ok(status) => {
             println!("[INFO] Container proceed changed state: {:?}", status);
-            Ok(())
+            Ok(false)
         }
         Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
     })
@@ -655,6 +669,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         &container_id, released_ip
     );
 
+    println!("{}", is_error);
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
     }
@@ -665,7 +680,11 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to umount overlayfs: {}", e);
     }
 
-    runtime_config.status = ContainerStatus::Exited;
+    if is_error {
+        runtime_config.status = ContainerStatus::Error;
+    } else {
+        runtime_config.status = ContainerStatus::Exited;
+    }
 
     fs::write(
         container_workdir.join("config.json"),
