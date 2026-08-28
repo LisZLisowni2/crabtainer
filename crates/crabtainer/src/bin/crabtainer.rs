@@ -176,7 +176,17 @@ async fn main() {
         }
         Commands::Image { action } => {
             match action {
-                ImageActions::Inspect { name } => {}
+                ImageActions::Inspect { name } => {
+                    let store = CrabtainerPaths::image_store_dir();
+                    let config_path = store
+                        .join(name)
+                        .join("config.json");
+                    if let Ok(content) = std::fs::read_to_string(config_path)
+                        && let Ok(image_config) = serde_json::from_str::<oci_client::config::ConfigFile>(content.as_str())
+                            && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config) {
+                        println!("{}", string_pretty);
+                    }
+                }
                 ImageActions::Rm { name } => {
                     let store = CrabtainerPaths::image_store_dir();
                     if name != "." {
@@ -317,7 +327,18 @@ async fn main() {
                         }
                     }
                 }
-                LayoutActions::Inspect { tag } => {}
+                LayoutActions::Inspect { tag } => {
+                    let store = CrabtainerPaths::layout_store_dir();
+                    let config_path = store
+                        .join(tag)
+                        .join("config.json");
+
+                    if let Ok(content) = std::fs::read_to_string(config_path)
+                        && let Ok(image_config) = serde_json::from_str::<oci_spec::runtime::Spec>(content.as_str())
+                        && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config) {
+                        println!("{}", string_pretty);
+                    }
+                }
                 LayoutActions::Ps => {
                     let store = CrabtainerPaths::layout_store_dir();
                     println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
