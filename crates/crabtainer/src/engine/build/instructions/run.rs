@@ -3,7 +3,11 @@ use nix::unistd::{chdir, chroot};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-pub async fn run_in_container(output_layout_name: &String, command: String) -> Result<(), String> {
+pub async fn run_in_container(
+    output_layout_name: &String,
+    workdir: Option<String>,
+    command: String,
+) -> Result<(), String> {
     println!(" => [RUN] Running '{}' command in container", command);
 
     let rootfs_path = CrabtainerPaths::layout_store_dir()
@@ -19,13 +23,19 @@ pub async fn run_in_container(output_layout_name: &String, command: String) -> R
         return Err(e.to_string());
     }
 
+    let workdir_final: String = if let Some(dir) = workdir {
+        dir
+    } else {
+        "/".to_string()
+    };
+
     let status = unsafe {
         Command::new("/bin/sh")
             .arg("-c")
             .arg(&command)
             .pre_exec(move || {
                 chroot(rootfs_path.as_path())?;
-                chdir("/")?;
+                chdir(workdir_final.as_str())?;
                 Ok(())
             })
             .status()

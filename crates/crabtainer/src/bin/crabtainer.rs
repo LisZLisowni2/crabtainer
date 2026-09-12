@@ -1,19 +1,23 @@
 use clap::{Parser, Subcommand};
-use getch_rs::Key;
 use crabtainer::engine::build::builder::build_layout;
 use crabtainer::engine::runtime::container::{run_container, spawn_detach_container};
 use crabtainer::engine::runtime::exec::ExecOptions;
-use crabtainer::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
+use crabtainer::engine::runtime::options::{
+    ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig,
+};
 use crabtainer::engine::runtime::stop::stop_container;
 use crabtainer::engine::support::paths::CrabtainerPaths;
+use getch_rs::Key;
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::{Path};
+use std::path::Path;
 use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "crabtainer")]
-#[command(about = "Crabtainer - A lightweight daemonless container engine built from scratch in Rust ")]
+#[command(
+    about = "Crabtainer - A lightweight daemonless container engine built from scratch in Rust "
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -97,7 +101,7 @@ enum Commands {
     System {
         #[command(subcommand)]
         action: SystemActions,
-    }
+    },
 }
 
 #[derive(Subcommand)]
@@ -174,203 +178,211 @@ async fn main() {
         Commands::Build { file, tag } => {
             build_layout(file, tag).await.unwrap();
         }
-        Commands::Image { action } => {
-            match action {
-                ImageActions::Inspect { name } => {
-                    let store = CrabtainerPaths::image_store_dir();
-                    let config_path = store
-                        .join(name)
-                        .join("config.json");
-                    if let Ok(content) = std::fs::read_to_string(config_path)
-                        && let Ok(image_config) = serde_json::from_str::<oci_client::config::ConfigFile>(content.as_str())
-                            && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config) {
-                        println!("{}", string_pretty);
-                    }
+        Commands::Image { action } => match action {
+            ImageActions::Inspect { name } => {
+                let store = CrabtainerPaths::image_store_dir();
+                let config_path = store.join(name).join("config.json");
+                if let Ok(content) = std::fs::read_to_string(config_path)
+                    && let Ok(image_config) =
+                        serde_json::from_str::<oci_client::config::ConfigFile>(content.as_str())
+                    && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config)
+                {
+                    println!("{}", string_pretty);
                 }
-                ImageActions::Rm { name } => {
-                    let store = CrabtainerPaths::image_store_dir();
-                    if name != "." {
-                        match std::fs::remove_dir_all(store.join(&name)) {
-                            Ok(_) => println!("{}", name),
-                            Err(e) => eprintln!("[ERROR] Failed to remove image: {}", e),
-                        }
-                    } else {
-                        println!("Are you sure to delete all images? [y/n]");
-                        let g = getch_rs::Getch::new();
+            }
+            ImageActions::Rm { name } => {
+                let store = CrabtainerPaths::image_store_dir();
+                if name != "." {
+                    match std::fs::remove_dir_all(store.join(&name)) {
+                        Ok(_) => println!("{}", name),
+                        Err(e) => eprintln!("[ERROR] Failed to remove image: {}", e),
+                    }
+                } else {
+                    println!("Are you sure to delete all images? [y/n]");
+                    let g = getch_rs::Getch::new();
 
-                        loop {
-                            match g.getch() {
-                                Ok(Key::Char('y')) => {
-                                    for entry in store.read_dir().unwrap().flatten() {
-                                        let path = entry.path();
-                                        let name = path.file_name().unwrap().to_str().unwrap();
+                    loop {
+                        match g.getch() {
+                            Ok(Key::Char('y')) => {
+                                for entry in store.read_dir().unwrap().flatten() {
+                                    let path = entry.path();
+                                    let name = path.file_name().unwrap().to_str().unwrap();
 
-                                        match std::fs::remove_dir_all(&path) {
-                                            Ok(_) => {},
-                                            Err(e) => eprintln!("[WARN] Failed to remove image {}: {}", name, e),
-                                        }
+                                    match std::fs::remove_dir_all(&path) {
+                                        Ok(_) => {}
+                                        Err(e) => eprintln!(
+                                            "[WARN] Failed to remove image {}: {}",
+                                            name, e
+                                        ),
                                     }
-                                    break;
                                 }
-                                Ok(Key::Char('n')) => {
-                                    break;
-                                }
-                                _ => {}
+                                break;
                             }
-                        }
-                    }
-                }
-                ImageActions::Pull { image, alias } => {
-                    crabtainer::engine::build::instructions::download::download_image_if_missing(image.as_str(), alias.as_str()).await.unwrap();
-                }
-                ImageActions::Ps => {
-                    let store = CrabtainerPaths::image_store_dir();
-                    println!("{:<20} {:<15}", "ALIAS", "SIZE");
-                    println!("{}", "-".repeat(38));
-                    std::fs::read_dir(&store).ok();
-
-                    if let Ok(entries) = std::fs::read_dir(store) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            let name = path
-                                .file_stem()
-                                .unwrap()
-                                .to_string_lossy()
-                                .replace(".tar.gz", "");
-
-                            let size = if path.is_dir() {
-                                WalkDir::new(path)
-                                    .into_iter()
-                                    .filter_map(|e| e.ok())
-                                    .filter_map(|e| e.metadata().ok())
-                                    .filter(|m| m.is_file())
-                                    .map(|m| m.len())
-                                    .sum()
-                            } else {
-                                std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-                            };
-
-                            println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                            Ok(Key::Char('n')) => {
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
-        }
-        Commands::Layout { action } => {
-            match action {
-                LayoutActions::Rm { tag } => {
-                    let store = CrabtainerPaths::layout_store_dir();
-                    let runtime_dir = CrabtainerPaths::runtime_dir();
-                    if tag != "." {
-                        let mut is_found = false;
+            ImageActions::Pull { image, alias } => {
+                crabtainer::engine::build::instructions::download::download_image_if_missing(
+                    image.as_str(),
+                    alias.as_str(),
+                )
+                .await
+                .unwrap();
+            }
+            ImageActions::Ps => {
+                let store = CrabtainerPaths::image_store_dir();
+                println!("{:<20} {:<15}", "ALIAS", "SIZE");
+                println!("{}", "-".repeat(38));
+                std::fs::read_dir(&store).ok();
 
-                        for entry in runtime_dir.read_dir().unwrap().flatten() {
-                            let path = entry.path();
-                            let config_path = path.join("config.json");
+                if let Ok(entries) = std::fs::read_dir(store) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let name = path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace(".tar.gz", "");
 
-                            if let Ok(content) = std::fs::read_to_string(&config_path)
-                                && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content) {
-                                    if config.layout_name == tag {
-                                        is_found = true;
-                                        break;
-                                    }
-                            }
-                        }
-
-                        if is_found {
-                            eprintln!("[ERROR] One of containers use this layout, delete it before deleting layout.");
-                            return;
-                        }
-
-                        if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
-                            eprintln!("[WARN] Failed to remove layout {}: {}", tag, e);
+                        let size = if path.is_dir() {
+                            WalkDir::new(path)
+                                .into_iter()
+                                .filter_map(|e| e.ok())
+                                .filter_map(|e| e.metadata().ok())
+                                .filter(|m| m.is_file())
+                                .map(|m| m.len())
+                                .sum()
+                        } else {
+                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
                         };
-                    } else {
-                        println!("Are you sure to delete all unused layouts? [y/n]");
-                        let g = getch_rs::Getch::new();
-                        
-                        loop {
-                            match g.getch() {
-                                Ok(Key::Char('y')) => {
-                                    let mut container_layout_hashset: HashSet<String> = HashSet::new();
 
-                                    for entry in runtime_dir.read_dir().unwrap().flatten() {
-                                        let path = entry.path();
-                                        let config_path = path.join("config.json");
+                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                    }
+                }
+            }
+        },
+        Commands::Layout { action } => match action {
+            LayoutActions::Rm { tag } => {
+                let store = CrabtainerPaths::layout_store_dir();
+                let runtime_dir = CrabtainerPaths::runtime_dir();
+                if tag != "." {
+                    let mut is_found = false;
 
-                                        if let Ok(content) = std::fs::read_to_string(&config_path)
-                                            && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content) {
-                                            container_layout_hashset.insert(config.layout_name);
-                                        }
-                                    }
+                    for entry in runtime_dir.read_dir().unwrap().flatten() {
+                        let path = entry.path();
+                        let config_path = path.join("config.json");
 
-                                    for entry in store.read_dir().unwrap().flatten() {
-                                        let path = entry.path();
-                                        let name = path
-                                            .file_name()
-                                            .unwrap()
-                                            .to_str()
-                                            .unwrap();
-
-                                        if !container_layout_hashset.contains(name) {
-                                            if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
-                                                eprintln!("[WARN] Failed to remove image {}: {}", tag, e);
-                                            };
-                                        }
-                                    }
-                                }
-                                Ok(Key::Char('n')) => {
-                                    break;
-                                }
-                                _ => {}
+                        if let Ok(content) = std::fs::read_to_string(&config_path)
+                            && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content)
+                        {
+                            if config.layout_name == tag {
+                                is_found = true;
+                                break;
                             }
                         }
                     }
-                }
-                LayoutActions::Inspect { tag } => {
-                    let store = CrabtainerPaths::layout_store_dir();
-                    let config_path = store
-                        .join(tag)
-                        .join("config.json");
 
-                    if let Ok(content) = std::fs::read_to_string(config_path)
-                        && let Ok(image_config) = serde_json::from_str::<oci_spec::runtime::Spec>(content.as_str())
-                        && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config) {
-                        println!("{}", string_pretty);
+                    if is_found {
+                        eprintln!(
+                            "[ERROR] One of containers use this layout, delete it before deleting layout."
+                        );
+                        return;
                     }
-                }
-                LayoutActions::Ps => {
-                    let store = CrabtainerPaths::layout_store_dir();
-                    println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
-                    println!("{}", "-".repeat(38));
 
-                    if let Ok(entries) = std::fs::read_dir(store) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            let name = path
-                                .file_stem()
-                                .unwrap()
-                                .to_string_lossy()
-                                .replace(".tar.gz", "");
+                    if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
+                        eprintln!("[WARN] Failed to remove layout {}: {}", tag, e);
+                    };
+                } else {
+                    println!("Are you sure to delete all unused layouts? [y/n]");
+                    let g = getch_rs::Getch::new();
 
-                            let size = if path.is_dir() {
-                                WalkDir::new(path)
-                                    .into_iter()
-                                    .filter_map(|e| e.ok())
-                                    .filter_map(|e| e.metadata().ok())
-                                    .filter(|m| m.is_file())
-                                    .map(|m| m.len())
-                                    .sum()
-                            } else {
-                                std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-                            };
+                    loop {
+                        match g.getch() {
+                            Ok(Key::Char('y')) => {
+                                let mut container_layout_hashset: HashSet<String> = HashSet::new();
 
-                            println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                                for entry in runtime_dir.read_dir().unwrap().flatten() {
+                                    let path = entry.path();
+                                    let config_path = path.join("config.json");
+
+                                    if let Ok(content) = std::fs::read_to_string(&config_path)
+                                        && let Ok(config) =
+                                            serde_json::from_str::<RuntimeConfig>(&content)
+                                    {
+                                        container_layout_hashset.insert(config.layout_name);
+                                    }
+                                }
+
+                                for entry in store.read_dir().unwrap().flatten() {
+                                    let path = entry.path();
+                                    let name = path.file_name().unwrap().to_str().unwrap();
+
+                                    if !container_layout_hashset.contains(name) {
+                                        if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
+                                            eprintln!(
+                                                "[WARN] Failed to remove image {}: {}",
+                                                tag, e
+                                            );
+                                        };
+                                    }
+                                }
+                            }
+                            Ok(Key::Char('n')) => {
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
-        }
+            LayoutActions::Inspect { tag } => {
+                let store = CrabtainerPaths::layout_store_dir();
+                let config_path = store.join(tag).join("config.json");
+
+                if let Ok(content) = std::fs::read_to_string(config_path)
+                    && let Ok(image_config) =
+                        serde_json::from_str::<oci_spec::runtime::Spec>(content.as_str())
+                    && let Ok(string_pretty) = serde_json::to_string_pretty(&image_config)
+                {
+                    println!("{}", string_pretty);
+                }
+            }
+            LayoutActions::Ps => {
+                let store = CrabtainerPaths::layout_store_dir();
+                println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
+                println!("{}", "-".repeat(38));
+
+                if let Ok(entries) = std::fs::read_dir(store) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let name = path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace(".tar.gz", "");
+
+                        let size = if path.is_dir() {
+                            WalkDir::new(path)
+                                .into_iter()
+                                .filter_map(|e| e.ok())
+                                .filter_map(|e| e.metadata().ok())
+                                .filter(|m| m.is_file())
+                                .map(|m| m.len())
+                                .sum()
+                        } else {
+                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                        };
+
+                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                    }
+                }
+            }
+        },
         Commands::Ps => {
             crabtainer::engine::runtime::refresh::refresh_container_states()
                 .await
@@ -423,18 +435,16 @@ async fn main() {
                 .expect("[ERROR] Failed to parse config");
 
             if config.status == ContainerStatus::Active {
-                stop_container(
-                    target_pid,
-                )
-                .await
-                .expect("[ERROR] Failed to stop container");
+                stop_container(target_pid)
+                    .await
+                    .expect("[ERROR] Failed to stop container");
             }
         }
         Commands::Rm { name } => {
             crabtainer::engine::runtime::refresh::refresh_container_states()
                 .await
                 .expect("[ERROR] Failed to refresh container states");
-            
+
             if name != "." {
                 let id = match search_id_by_name(name).await {
                     Some(id) => id,
@@ -485,7 +495,7 @@ async fn main() {
                     return;
                 }
             };
-            
+
             let runtime_dir = CrabtainerPaths::runtime_dir().join(&id);
             let target_pid = find_pid(&id, runtime_dir);
 
@@ -512,7 +522,9 @@ async fn main() {
                     return;
                 }
             };
-            crabtainer::engine::runtime::start::start_container(id).await.unwrap();
+            crabtainer::engine::runtime::start::start_container(id)
+                .await
+                .unwrap();
         }
         Commands::Restart { name } => {
             crabtainer::engine::runtime::refresh::refresh_container_states()
@@ -526,19 +538,23 @@ async fn main() {
                     return;
                 }
             };
-            crabtainer::engine::runtime::start::restart_container(id).await.unwrap();
+            crabtainer::engine::runtime::start::restart_container(id)
+                .await
+                .unwrap();
         }
-        Commands::System { action } => {
-            match action {
-                SystemActions::Prune => {}
-                SystemActions::InitSystemd => {
-                    crabtainer::engine::support::systemd::init_systemd_config().await.unwrap();
-                }
-                SystemActions::Autostart => {
-                    crabtainer::engine::runtime::autostart::autostart_detached().await.unwrap();
-                }
+        Commands::System { action } => match action {
+            SystemActions::Prune => {}
+            SystemActions::InitSystemd => {
+                crabtainer::engine::support::systemd::init_systemd_config()
+                    .await
+                    .unwrap();
             }
-        }
+            SystemActions::Autostart => {
+                crabtainer::engine::runtime::autostart::autostart_detached()
+                    .await
+                    .unwrap();
+            }
+        },
     }
 }
 
@@ -568,7 +584,8 @@ async fn search_id_by_name(name: String) -> Option<String> {
     for entry in entries.flatten() {
         let path = entry.path();
 
-        let config_content = std::fs::read_to_string(&path.join("config.json")).expect("[ERROR] Failed to read config");
+        let config_content = std::fs::read_to_string(&path.join("config.json"))
+            .expect("[ERROR] Failed to read config");
         let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
             Ok(cfg) => cfg,
             Err(_) => continue,
@@ -650,7 +667,7 @@ mod tests {
                 name,
                 detach,
                 rm,
-                restart
+                restart,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -678,7 +695,7 @@ mod tests {
                 args,
                 detach,
                 rm,
-                restart
+                restart,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);

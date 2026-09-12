@@ -6,7 +6,6 @@ use walkdir::WalkDir;
 
 pub struct CrabtainerIgnore {
     rules: Vec<(GlobSet, bool)>,
-    root: PathBuf,
 }
 
 impl CrabtainerIgnore {
@@ -53,17 +52,17 @@ impl CrabtainerIgnore {
             }
         }
 
-        Self { rules, root }
+        Self { rules }
     }
 
-    pub fn is_ignored(&self, relative_path: &Path) -> bool {
-        if relative_path == Path::new(".crabtainerignore") {
+    pub fn is_ignored(&self, absolute_path: &Path) -> bool {
+        if absolute_path == Path::new(&absolute_path.join(".crabtainerignore")) {
             return true;
         }
 
         let mut ignored = false;
         for (globset, is_negated) in &self.rules {
-            if globset.is_match(relative_path) {
+            if globset.is_match(absolute_path) {
                 ignored = !is_negated;
             }
         }
@@ -81,19 +80,13 @@ impl CrabtainerIgnore {
                 if e.path() == source_dir {
                     return true;
                 }
-                if let Ok(rel) = e.path().strip_prefix(&self.root) {
-                    !self.is_ignored(rel)
-                } else {
-                    true
-                }
+
+                !self.is_ignored(e.path())
             })
             .flatten()
         {
             if entry.file_type().is_file() {
-                let rel = entry
-                    .path()
-                    .strip_prefix(&self.root)
-                    .unwrap_or(entry.path());
+                let rel = entry.path();
                 files.push(rel.to_path_buf());
             }
         }
@@ -102,7 +95,12 @@ impl CrabtainerIgnore {
     }
 }
 
-pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> Result<(), String> {
+pub async fn copy_to_layout(
+    src: &str,
+    dst: &str,
+    output_layout_name: &str,
+    build_dir: &PathBuf,
+) -> Result<(), String> {
     let dst_relative = Path::new(&dst).strip_prefix("/").unwrap_or(Path::new(&dst));
 
     let destination = CrabtainerPaths::layout_store_dir()
@@ -110,14 +108,15 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
         .join("rootfs")
         .join(dst_relative);
 
+    println!("{}", destination.display());
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!(" => [COPY] Failed to create directories: {}", err))?;
     }
 
     let mut ignore: Vec<String> = Vec::new();
-    if fs::metadata(".crabtainerignore").is_ok() {
-        let splited: Vec<String> = fs::read_to_string(".crabtainerignore")
+    if fs::metadata(build_dir.join(".crabtainerignore")).is_ok() {
+        let splited: Vec<String> = fs::read_to_string(build_dir.join(".crabtainerignore"))
             .expect(" => [COPY] Failed to open .crabtainerignore")
             .split("\n")
             .map(|s| s.to_string())
@@ -126,13 +125,16 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
         ignore.extend(splited);
     }
 
-    let ignore_engine = CrabtainerIgnore::new(".");
+    let ignore_engine = CrabtainerIgnore::new(&build_dir);
 
     // Case 1: Universal wildcard (Copy entire workspace respecting ignores)
     if src == "*" {
-        let files_to_copy = ignore_engine.collect_files(Path::new("."));
+        let files_to_copy = ignore_engine.collect_files(build_dir.as_path());
 
-        for rel_path in files_to_copy {
+        for src_path in files_to_copy {
+            let rel_path = src_path
+                .strip_prefix(build_dir)
+                .expect("Failed to strip prefix");
             let target_path = destination.join(&rel_path);
 
             if let Some(parent) = target_path.parent() {
@@ -145,8 +147,8 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
                 })?;
             }
 
-            fs::copy(&rel_path, &target_path)
-                .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", rel_path.display(), e))?;
+            fs::copy(&src_path, &target_path)
+                .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", src_path.display(), e))?;
         }
         return Ok(());
     }
@@ -154,13 +156,13 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
     // Case 2 & 3: Glob expansion or direct paths
     let entries = if src.contains('*') || src.contains('?') || src.contains('[') {
         // Expand glob pattern
-        glob::glob(src)
+        glob::glob(build_dir.to_str().unwrap())
             .map_err(|e| format!(" => [COPY] Invalid glob pattern '{}': {}", src, e))?
             .filter_map(Result::ok)
             .collect::<Vec<_>>()
     } else {
         // Single static path
-        vec![Path::new(&src).to_path_buf()]
+        vec![Path::new(&build_dir).to_path_buf()]
     };
 
     if entries.is_empty() {
@@ -169,12 +171,9 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
     }
 
     for src_path in entries {
-        // Normalize path relative to workspace root for ignore checking
-        let rel_path = src_path.strip_prefix("./").unwrap_or(&src_path);
-
         // Skip ignored paths
-        if ignore_engine.is_ignored(rel_path) {
-            println!(" => [COPY] Skipping ignored path: {}", rel_path.display());
+        if ignore_engine.is_ignored(src_path.as_path()) {
+            println!(" => [COPY] Skipping ignored path: {}", src_path.display());
             continue;
         }
 
@@ -198,7 +197,7 @@ pub async fn copy_to_layout(src: &str, dst: &str, output_layout_name: &str) -> R
             }
         } else if src_path.is_file() {
             // Replicate relative structure under destination
-            let target_path = destination.join(rel_path);
+            let target_path = destination.join(&src_path);
 
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {

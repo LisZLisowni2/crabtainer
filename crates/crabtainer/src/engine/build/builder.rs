@@ -1,8 +1,8 @@
+use crate::engine::build::crabtainerfile::{Crabtainerfile, Instruction, parse_memory_limit};
 use crate::engine::build::instructions::copy::copy_to_layout;
 use crate::engine::build::instructions::download::download_image_if_missing;
 use crate::engine::build::instructions::from::from_image;
 use crate::engine::build::instructions::run::run_in_container;
-use crate::engine::build::crabtainerfile::{Instruction, Crabtainerfile, parse_memory_limit};
 use crate::engine::build::spec::{LayoutOpts, save_config};
 use crate::engine::support::paths::CrabtainerPaths;
 use std::path::Path;
@@ -12,6 +12,21 @@ pub async fn build_layout(
     output_layout_name: String,
 ) -> Result<(), String> {
     let crabtainer_path = Path::new(crabtainer_file.as_str());
+    println!("{}", crabtainer_path.display());
+
+    let crabtainer_parent_path = crabtainer_path
+        .parent()
+        .expect("Failed to retrieve parent directory");
+
+    println!("{}", crabtainer_parent_path.display());
+    let mut crabtainer_parent_absolute_path;
+    if !crabtainer_parent_path.is_empty() {
+        crabtainer_parent_absolute_path = std::fs::canonicalize(crabtainer_parent_path)
+            .expect("Failed to canonicalize crabtainer parent dir");
+    } else {
+        crabtainer_parent_absolute_path =
+            std::fs::canonicalize(".").expect("Failed to canonicalize . dir");
+    }
 
     let crabtainer = Crabtainerfile::parse_from_file(crabtainer_path)?;
 
@@ -34,16 +49,28 @@ pub async fn build_layout(
         memory_limit: None,
         cpu_limit: None,
         args: vec![],
+        workdir: None,
     };
 
     for instruction in crabtainer.instructions {
         count += 1;
         match instruction {
-            Instruction::Download { image_ref, alias } => {
-                println!(
-                    " => [{}/{}] DOWNLOAD {} AS {}",
-                    count, steps, image_ref, alias
-                );
+            Instruction::Download {
+                image_ref,
+                alias,
+                is_override,
+            } => {
+                if !is_override {
+                    println!(
+                        " => [{}/{}] DOWNLOAD {} AS {}",
+                        count, steps, image_ref, alias
+                    );
+                } else {
+                    println!(
+                        " => [{}/{}] DOWNLOAD {} AS {} OVERRIDE",
+                        count, steps, image_ref, alias
+                    );
+                }
                 download_image_if_missing(&image_ref, &alias).await?;
             }
             Instruction::From(base_image) => {
@@ -52,11 +79,37 @@ pub async fn build_layout(
             }
             Instruction::Copy { src, dst } => {
                 println!(" => [{}/{}] COPY {} to {}", count, steps, src, dst);
-                copy_to_layout(src.as_str(), dst.as_str(), &output_layout_name).await?;
+                if dst == "~" {
+                    if let Some(work_dst) = opts.workdir.clone() {
+                        copy_to_layout(
+                            src.as_str(),
+                            work_dst.as_str(),
+                            &output_layout_name,
+                            &crabtainer_parent_absolute_path,
+                        )
+                        .await?;
+                    } else {
+                        copy_to_layout(
+                            src.as_str(),
+                            "/",
+                            &output_layout_name,
+                            &crabtainer_parent_absolute_path,
+                        )
+                        .await?;
+                    }
+                } else {
+                    copy_to_layout(
+                        src.as_str(),
+                        dst.as_str(),
+                        &output_layout_name,
+                        &crabtainer_parent_absolute_path,
+                    )
+                    .await?;
+                }
             }
             Instruction::Run(command) => {
                 println!(" => [{}/{}] RUN {}", count, steps, command);
-                run_in_container(&output_layout_name, command).await?;
+                run_in_container(&output_layout_name, opts.workdir.clone(), command).await?;
             }
             Instruction::Cmd { args } => {
                 println!(" => [{}/{}] CMD {:?}", count, steps, args);
@@ -70,6 +123,10 @@ pub async fn build_layout(
                 println!(" => [{}/{}] MEMORY LIMIT {}", count, steps, limit);
                 let bytes = parse_memory_limit(limit.as_str())?;
                 opts.memory_limit = Some(bytes);
+            }
+            Instruction::Workdir(directory) => {
+                println!(" => [{}/{}] WORKDIR {}", count, steps, directory);
+                opts.workdir = Some(directory);
             }
         }
     }

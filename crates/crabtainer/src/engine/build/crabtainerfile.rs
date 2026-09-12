@@ -3,13 +3,23 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Download { image_ref: String, alias: String },
+    Download {
+        image_ref: String,
+        alias: String,
+        is_override: bool,
+    },
     From(String),
-    Copy { src: String, dst: String },
+    Copy {
+        src: String,
+        dst: String,
+    },
     Run(String),
-    Cmd { args: Vec<String> },
+    Cmd {
+        args: Vec<String>,
+    },
     CpuLimit(f64),
     MemoryLimit(String),
+    Workdir(String),
 }
 
 #[derive(Debug, Default)]
@@ -77,10 +87,20 @@ impl Crabtainerfile {
                         instructions.push(Instruction::Download {
                             image_ref: parts[0].to_string(),
                             alias: parts[2].to_string(),
+                            is_override: false,
+                        });
+                    } else if parts.len() == 4
+                        && parts[1].to_uppercase() == "AS"
+                        && parts[3].to_uppercase() == "OVERRIDE"
+                    {
+                        instructions.push(Instruction::Download {
+                            image_ref: parts[0].to_string(),
+                            alias: parts[2].to_string(),
+                            is_override: true,
                         });
                     } else {
                         return Err(format!(
-                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS>",
+                            "Line {}: DOWNLOAD syntax requires format: DOWNLOAD <IMAGE_REF> AS <ALIAS> [OVERRIDE]",
                             line_num + 1
                         ));
                     }
@@ -152,6 +172,13 @@ impl Crabtainerfile {
                         .map_err(|e| format!("Line {}: {}", line_num + 1, e))?;
                     instructions.push(Instruction::MemoryLimit(args.to_string()));
                 }
+                "WORKDIR" => {
+                    if args.is_empty() {
+                        return Err(format!("Line {}: Required argument", line_num + 1));
+                    }
+
+                    instructions.push(Instruction::Workdir(args.to_string()));
+                }
                 _ => {
                     return Err(format!("Line {}: Unknown keyword", line_num + 1));
                 }
@@ -169,7 +196,7 @@ mod tests {
     #[test]
     fn parses_all_instruction_types() {
         let content = "\
-DOWNLOAD ubuntu:latest AS ubuntu
+DOWNLOAD ubuntu:latest AS ubuntu OVERRIDE
 FROM ubuntu
 COPY src /app
 RUN echo hello
@@ -182,6 +209,7 @@ CMD /bin/sh -c
                 Instruction::Download {
                     image_ref: "ubuntu:latest".to_string(),
                     alias: "ubuntu".to_string(),
+                    is_override: true,
                 },
                 Instruction::From("ubuntu".to_string()),
                 Instruction::Copy {
@@ -204,6 +232,7 @@ CMD /bin/sh -c
             vec![Instruction::Download {
                 image_ref: "ubuntu:latest".to_string(),
                 alias: "ubuntu".to_string(),
+                is_override: false,
             },]
         );
     }

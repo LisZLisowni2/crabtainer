@@ -10,6 +10,7 @@ pub struct LayoutOpts {
     pub memory_limit: Option<f64>,
     pub cpu_limit: Option<f64>,
     pub args: Vec<String>,
+    pub workdir: Option<String>,
 }
 
 pub async fn save_config(
@@ -24,6 +25,11 @@ pub async fn save_config(
     };
 
     let memory = opts.memory_limit.unwrap_or(1024f64 * 1024f64 * 1024f64); // 1GB Default
+    let cwd = if let Some(dir) = opts.workdir {
+        dir
+    } else {
+        "/".to_string()
+    };
 
     let spec = SpecBuilder::default()
         .root(
@@ -35,6 +41,7 @@ pub async fn save_config(
         .process(
             ProcessBuilder::default()
                 .terminal(true)
+                .cwd(cwd)
                 .args(opts.args)
                 .build()?,
         )
@@ -95,6 +102,7 @@ mod tests {
                 "-c".to_string(),
                 "echo hi".to_string(),
             ],
+            workdir: Some("/app".to_string()),
         }
     }
 
@@ -114,6 +122,7 @@ mod tests {
                 "echo hi".to_string()
             ]
         );
+        assert_eq!(decoded.workdir, Some("/app".to_string()));
     }
 
     #[tokio::test]
@@ -129,7 +138,7 @@ mod tests {
         assert_eq!(resources.cpu().as_ref().unwrap().quota(), Some(150000));
         assert_eq!(resources.cpu().as_ref().unwrap().period(), Some(100000));
         assert_eq!(resources.memory().as_ref().unwrap().limit(), Some(2048));
-
+        assert_eq!(spec.process().as_ref().unwrap().cwd(), "/app");
         assert_eq!(spec.root().as_ref().unwrap().path(), "rootfs");
         assert_eq!(
             spec.process().as_ref().unwrap().args().as_ref().unwrap(),
@@ -148,6 +157,7 @@ mod tests {
             memory_limit: None,
             cpu_limit: None,
             args: vec![],
+            workdir: None,
         };
         save_config(opts, dir.path().to_path_buf()).await.unwrap();
 
@@ -156,7 +166,10 @@ mod tests {
 
         assert_eq!(resources.cpu().as_ref().unwrap().quota(), Some(100000));
         assert_eq!(resources.cpu().as_ref().unwrap().period(), Some(100000));
-        assert_eq!(resources.memory().as_ref().unwrap().limit(), Some(1073741824));
+        assert_eq!(
+            resources.memory().as_ref().unwrap().limit(),
+            Some(1073741824)
+        );
         assert!(
             spec.process()
                 .as_ref()
@@ -166,5 +179,6 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert_eq!(spec.process().as_ref().unwrap().cwd(), "/")
     }
 }
