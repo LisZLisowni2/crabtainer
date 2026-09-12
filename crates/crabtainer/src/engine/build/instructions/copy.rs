@@ -156,63 +156,64 @@ pub async fn copy_to_layout(
     // Case 2 & 3: Glob expansion or direct paths
     let entries = if src.contains('*') || src.contains('?') || src.contains('[') {
         // Expand glob pattern
-        glob::glob(build_dir.to_str().unwrap())
+        glob::glob(src)
             .map_err(|e| format!(" => [COPY] Invalid glob pattern '{}': {}", src, e))?
             .filter_map(Result::ok)
             .collect::<Vec<_>>()
     } else {
         // Single static path
-        vec![Path::new(&build_dir).to_path_buf()]
+        vec![Path::new(&src).to_path_buf()]
     };
 
     if entries.is_empty() {
         println!(" => [COPY] Warning: No files matched pattern '{}'", src);
         return Ok(());
     }
+    println!("{:?}", entries);
 
-    for src_path in entries {
-        // Skip ignored paths
-        if ignore_engine.is_ignored(src_path.as_path()) {
-            println!(" => [COPY] Skipping ignored path: {}", src_path.display());
-            continue;
-        }
+    //for src_path in entries {
+    //    // Skip ignored paths
+    //    if ignore_engine.is_ignored(src_path.as_path()) {
+    //        println!(" => [COPY] Skipping ignored path: {}", src_path.display());
+    //        continue;
+    //    }
 
-        if src_path.is_dir() {
-            // Recursively collect and copy directory contents
-            let files = ignore_engine.collect_files(&src_path);
-            for rel_file in files {
-                let target_path = destination.join(&rel_file);
-                if let Some(parent) = target_path.parent() {
-                    fs::create_dir_all(parent).map_err(|e| {
-                        format!(
-                            " => [COPY] Failed to create dir {}: {}",
-                            parent.display(),
-                            e
-                        )
-                    })?;
-                }
-                fs::copy(&rel_file, &target_path).map_err(|e| {
-                    format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e)
-                })?;
-            }
-        } else if src_path.is_file() {
-            // Replicate relative structure under destination
-            let target_path = destination.join(&src_path);
+    //    if src_path.is_dir() {
+    //        // Recursively collect and copy directory contents
+    //        let files = ignore_engine.collect_files(&src_path);
+    //        for rel_file in files {
+    //            let target_path = destination.join(&rel_file);
+    //            if let Some(parent) = target_path.parent() {
+    //                fs::create_dir_all(parent).map_err(|e| {
+    //                    format!(
+    //                        " => [COPY] Failed to create dir {}: {}",
+    //                        parent.display(),
+    //                        e
+    //                    )
+    //                })?;
+    //            }
+    //            fs::copy(&rel_file, &target_path).map_err(|e| {
+    //                format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e)
+    //            })?;
+    //        }
+    //    } else if src_path.is_file() {
+    //        // Replicate relative structure under destination
+    //        let target_path = destination.join(&src_path);
 
-            if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    format!(
-                        " => [COPY] Failed to create dir {}: {}",
-                        parent.display(),
-                        e
-                    )
-                })?;
-            }
+    //        if let Some(parent) = target_path.parent() {
+    //            fs::create_dir_all(parent).map_err(|e| {
+    //                format!(
+    //                    " => [COPY] Failed to create dir {}: {}",
+    //                    parent.display(),
+    //                    e
+    //                )
+    //            })?;
+    //        }
 
-            fs::copy(&src_path, &target_path)
-                .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", src_path.display(), e))?;
-        }
-    }
+    //        fs::copy(&src_path, &target_path)
+    //            .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", src_path.display(), e))?;
+    //    }
+    //}
 
     Ok(())
 }

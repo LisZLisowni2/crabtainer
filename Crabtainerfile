@@ -2,9 +2,9 @@ DOWNLOAD gentoo/stage3:20260817 AS gentoo
 
 FROM gentoo
 
-# RUN mkdir test
+RUN mkdir test
 
-# COPY Crabtainerfile /
+COPY Crabtainerfile /
 # COPY Crabtainerfile /test/
 # COPY src/lib.rs /test/
 # COPY src /test/src/

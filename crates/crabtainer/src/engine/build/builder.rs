@@ -12,13 +12,11 @@ pub async fn build_layout(
     output_layout_name: String,
 ) -> Result<(), String> {
     let crabtainer_path = Path::new(crabtainer_file.as_str());
-    println!("{}", crabtainer_path.display());
 
     let crabtainer_parent_path = crabtainer_path
         .parent()
         .expect("Failed to retrieve parent directory");
 
-    println!("{}", crabtainer_parent_path.display());
     let mut crabtainer_parent_absolute_path;
     if !crabtainer_parent_path.is_empty() {
         crabtainer_parent_absolute_path = std::fs::canonicalize(crabtainer_parent_path)
