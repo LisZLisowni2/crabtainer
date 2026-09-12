@@ -176,7 +176,11 @@ async fn main() {
             }
         }
         Commands::Build { file, tag } => {
-            build_layout(file, tag).await.unwrap();
+            let canonicalized = std::fs::canonicalize(file)
+                .expect("Failed to canonicalize crabtainerfile path")
+                .into_string()
+                .expect("Failed to convert to String");
+            build_layout(canonicalized, tag).await.unwrap();
         }
         Commands::Image { action } => match action {
             ImageActions::Inspect { name } => {
