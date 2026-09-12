@@ -170,6 +170,13 @@ pub async fn copy_to_layout(
     }
 
     for src_path in entries {
+        let conjoin_path = PathBuf::from(format!(
+            "{}/{}",
+            build_dir
+                .to_str()
+                .expect("Failed to convert build_dir to &str"),
+            src_path.display()
+        ));
         // Skip ignored paths
         if ignore_engine.is_ignored(src_path.as_path()) {
             println!(" => [COPY] Skipping ignored path: {}", src_path.display());
@@ -178,8 +185,11 @@ pub async fn copy_to_layout(
 
         if src_path.is_dir() {
             // Recursively collect and copy directory contents
-            let files = ignore_engine.collect_files(&src_path);
-            for rel_file in files {
+            let files = ignore_engine.collect_files(&conjoin_path.as_path());
+            for absolute_file in files {
+                let rel_file = absolute_file
+                    .strip_prefix(&build_dir)
+                    .expect("Failed to strip prefix");
                 let target_path = destination.join(&rel_file);
                 if let Some(parent) = target_path.parent() {
                     fs::create_dir_all(parent).map_err(|e| {
@@ -194,9 +204,12 @@ pub async fn copy_to_layout(
                     format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e)
                 })?;
             }
-        } else if src_path.is_file() {
+        } else if conjoin_path.is_file() {
             // Replicate relative structure under destination
-            let target_path = destination.join(&src_path);
+            let rel_path = conjoin_path
+                .strip_prefix(&build_dir)
+                .expect("Failed to strip prefix");
+            let target_path = destination.join(&rel_path);
 
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
@@ -208,7 +221,7 @@ pub async fn copy_to_layout(
                 })?;
             }
 
-            fs::copy(&src_path, &target_path)
+            fs::copy(&conjoin_path, &target_path)
                 .map_err(|e| format!(" => [COPY] Failed to copy {}: {}", src_path.display(), e))?;
         }
     }

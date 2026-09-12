@@ -5,7 +5,7 @@ FROM gentoo
 RUN mkdir test
 
 COPY Crabtainerfile /
-# COPY Crabtainerfile /test/
-# COPY src/lib.rs /test/
-# COPY src /test/src/
+COPY Crabtainerfile /test/
+COPY examples/Crabtainerfile2 /test/
+COPY examples/ /tests/
 # COPY * /test/entire_base/
