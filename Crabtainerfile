@@ -2,10 +2,8 @@ DOWNLOAD gentoo/stage3:20260817 AS gentoo
 
 FROM gentoo
 
-RUN mkdir test
-
 COPY Crabtainerfile /
 COPY Crabtainerfile /test/
 COPY examples/Crabtainerfile2 /test/
 COPY examples/ /tests/
-# COPY * /test/entire_base/
+COPY * /test/entire_base/
