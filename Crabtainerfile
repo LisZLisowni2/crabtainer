@@ -4,6 +4,4 @@ FROM gentoo
 
 COPY Crabtainerfile /
 COPY Crabtainerfile /test/
-COPY examples/Crabtainerfile2 /test/
-COPY examples/ /tests/
 COPY * /test/entire_base/
