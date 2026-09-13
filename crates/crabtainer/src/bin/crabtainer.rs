@@ -297,12 +297,11 @@ async fn main() {
 
                         if let Ok(content) = std::fs::read_to_string(&config_path)
                             && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content)
-                        {
-                            if config.layout_name == tag {
-                                is_found = true;
-                                break;
+                                && if config.layout_name == tag {
+                                    is_found = true;
+                                    break;
                             }
-                        }
+                        
                     }
 
                     if is_found {
@@ -340,14 +339,11 @@ async fn main() {
                                     let path = entry.path();
                                     let name = path.file_name().unwrap().to_str().unwrap();
 
-                                    if !container_layout_hashset.contains(name) {
-                                        if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
-                                            eprintln!(
-                                                "[WARN] Failed to remove image {}: {}",
-                                                tag, e
-                                            );
-                                        };
-                                    }
+                                    if !container_layout_hashset.contains(name)
+                                        && let Err(e) = std::fs::remove_dir_all(&store.join(&tag))
+                                    {
+                                        eprintln!("[WARN] Failed to remove image {}: {}", tag, e);
+                                    };
                                 }
                             }
                             Ok(Key::Char('n')) => {
