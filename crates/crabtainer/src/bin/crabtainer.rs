@@ -114,9 +114,18 @@ enum SystemActions {
 #[derive(Subcommand)]
 enum ImageActions {
     Ps,
-    Rm { name: String },
-    Pull { image: String, alias: String },
-    Inspect { name: String },
+    Rm {
+        name: String,
+    },
+    Pull {
+        image: String,
+        alias: String,
+        #[arg(short, long, default_value_t = false)]
+        overriding: bool,
+    },
+    Inspect {
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -230,10 +239,15 @@ async fn main() {
                     }
                 }
             }
-            ImageActions::Pull { image, alias } => {
+            ImageActions::Pull {
+                image,
+                alias,
+                overriding,
+            } => {
                 crabtainer::engine::build::instructions::download::download_image_if_missing(
                     image.as_str(),
                     alias.as_str(),
+                    overriding,
                 )
                 .await
                 .unwrap();

@@ -17,14 +17,12 @@ pub async fn build_layout(
         .parent()
         .expect("Failed to retrieve parent directory");
 
-    let mut crabtainer_parent_absolute_path;
-    if !crabtainer_parent_path.is_empty() {
-        crabtainer_parent_absolute_path = std::fs::canonicalize(crabtainer_parent_path)
-            .expect("Failed to canonicalize crabtainer parent dir");
+    let crabtainer_parent_absolute_path = if !crabtainer_parent_path.is_empty() {
+        std::fs::canonicalize(crabtainer_parent_path)
+            .expect("Failed to canonicalize crabtainer parent dir")
     } else {
-        crabtainer_parent_absolute_path =
-            std::fs::canonicalize(".").expect("Failed to canonicalize . dir");
-    }
+        std::fs::canonicalize(".").expect("Failed to canonicalize . dir")
+    };
 
     let crabtainer = Crabtainerfile::parse_from_file(crabtainer_path)?;
 
@@ -69,7 +67,7 @@ pub async fn build_layout(
                         count, steps, image_ref, alias
                     );
                 }
-                download_image_if_missing(&image_ref, &alias).await?;
+                download_image_if_missing(&image_ref, &alias, is_override).await?;
             }
             Instruction::From(base_image) => {
                 println!(" => [{}/{}] FROM {}", count, steps, base_image);
