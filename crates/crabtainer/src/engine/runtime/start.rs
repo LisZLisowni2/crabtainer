@@ -5,7 +5,9 @@ use crate::engine::support::paths::CrabtainerPaths;
 async fn retrieve_config(
     container_id: &String,
 ) -> Result<RuntimeConfig, Box<dyn std::error::Error>> {
-    let config_path = CrabtainerPaths::runtime_dir().join(&container_id).join("config.json");
+    let config_path = CrabtainerPaths::runtime_dir()
+        .join(&container_id)
+        .join("config.json");
     let content = std::fs::read_to_string(config_path)?;
     let config = match serde_json::from_str(&content) {
         Ok(cfg) => cfg,
@@ -18,9 +20,7 @@ async fn retrieve_config(
     Ok(config)
 }
 
-pub async fn restart_container(
-    container_id: String
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn restart_container(container_id: String) -> Result<(), Box<dyn std::error::Error>> {
     let config = retrieve_config(&container_id).await?;
 
     if config.status != ContainerStatus::Active {
@@ -37,9 +37,7 @@ pub async fn restart_container(
     Ok(())
 }
 
-pub async fn start_container(
-    container_id: String
-) -> Result<(), Box<dyn std::error::Error>>  {
+pub async fn start_container(container_id: String) -> Result<(), Box<dyn std::error::Error>> {
     let config = retrieve_config(&container_id).await?;
 
     if config.status == ContainerStatus::Active {
@@ -55,13 +53,15 @@ pub async fn start_container(
         rm: config.rm,
         restart_policy: config.restart_policy,
         layout_name: config.layout_name,
+        ports: config.ports,
     };
-    
+
     if config.is_detached {
         spawn_detach_container(opts, container_id).await?;
     } else {
         run_container(opts, container_id).await?;
     }
-    
+
     Ok(())
 }
+

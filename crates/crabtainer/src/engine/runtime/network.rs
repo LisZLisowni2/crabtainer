@@ -23,6 +23,20 @@ pub struct NetworkManager {
     subnet_prefix: u8,
 }
 
+pub struct PortForwarding {
+    host: String,
+    container: String,
+}
+
+impl PortForwarding {
+    pub fn new(host_port: String, container_port: String) -> Self {
+        Self {
+            host: host_port,
+            container: container_port,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum IpamError {
     #[error("Subnet exhausted: no available IPs left")]
@@ -326,6 +340,162 @@ impl NetworkManager {
             eprintln!("[NETWORK] Failed to attach container to IP address: {}", e);
         };
 
+        Ok(())
+    }
+
+    pub async fn handle_ports(&self, ports: Vec<String>) -> Result<Vec<PortForwarding>, String> {
+        /*
+         * Possible values:
+         * - 3432:5835
+         * - 2000-3000:2000-3000
+         * */
+        let mut parsed_ports: Vec<PortForwarding> = Vec::new();
+
+        for port_str in ports {
+            let parts: Vec<&str> = port_str.split(':').collect();
+
+            if parts.len() == 2 {
+                let first_part = parts[0].to_string();
+                let second_part = parts[1].to_string();
+                if first_part.contains('-') && second_part.contains('-') {
+                    let separated_first_part: Vec<&str> = first_part.split('-').collect();
+                    let separated_second_part: Vec<&str> = second_part.split('-').collect();
+                    let lower_bound_first = separated_first_part[0]
+                        .parse::<u32>()
+                        .expect("[ERROR] Failed to parse to u32 lower_bound_first");
+                    let upper_bound_first = separated_first_part[0]
+                        .parse::<u32>()
+                        .expect("[ERROR] Failed to parse to u32 upper_bound_first");
+                    let lower_bound_second = separated_second_part[1]
+                        .parse::<u32>()
+                        .expect("[ERROR] Failed to parse to u32 lower_bound_second");
+                    let upper_bound_second = separated_second_part[1]
+                        .parse::<u32>()
+                        .expect("[ERROR] Failed to parse to u32 upper_bound_second");
+
+                    if upper_bound_first - lower_bound_first
+                        != upper_bound_second - lower_bound_second
+                    {
+                        return Err("[ERROR] Ranges of ports have different sizes".to_string());
+                    }
+
+                    for i in lower_bound_first..=upper_bound_first {
+                        let port = PortForwarding::new(i.to_string(), i.to_string());
+                        parsed_ports.push(port);
+                    }
+                } else if !first_part.contains('-') && !second_part.contains('-') {
+                    let port = PortForwarding::new(first_part, second_part);
+                    parsed_ports.push(port);
+                } else {
+                    return Err("[ERROR] You can set range only or single port only".to_string());
+                }
+            } else {
+                return Err(
+                    "[ERROR] Incorrect port assignment (if you're looking for assigning IPs, this feature isn't supported)".to_string()
+                );
+            }
+        }
+
+        Ok(parsed_ports)
+    }
+
+    pub async fn add_portforwarding(
+        &self,
+        ports: Vec<PortForwarding>,
+        container_ip: Ipv4Addr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let ipt = iptables::new(false)?;
+
+        for port in ports {
+            let rule = format!(
+                "-p tcp --dport {} -j DNAT --to-destination {}:{}",
+                port.host, container_ip, port.container
+            );
+
+            if !ipt.exists("nat", "POSTROUTING", rule.as_str())? {
+                ipt.append("nat", "POSTROUTING", rule.as_str())?;
+                println!(
+                    "[IPTABLES] Added port route for ports {}:{}",
+                    port.host, port.container
+                );
+            }
+
+            let forward_rule = format!(
+                "-p tcp -d {} --dport {} -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT",
+                container_ip, port.container
+            );
+
+            if !ipt.exists("filter", "FORWARD", forward_rule.as_str())? {
+                ipt.append("filter", "FORWARD", forward_rule.as_str())?;
+                println!(
+                    "[IPTABLES] Added forward rule for container's ip {} and port {}",
+                    container_ip, port.container
+                )
+            }
+
+            let output_rule = format!(
+                "-p tcp -o lo --dport {} -j DNAT --to-destination {}:{}",
+                port.host, container_ip, port.container
+            );
+
+            if !ipt.exists("nat", "OUTPUT", output_rule.as_str())? {
+                ipt.append("nat", "OUTPUT", output_rule.as_str())?;
+                println!(
+                    "[IPTABLES] Added output rule for ports {}:{}",
+                    port.host, port.container
+                )
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn remove_portforwarding(
+        &self,
+        ports: Vec<PortForwarding>,
+        container_ip: Ipv4Addr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let ipt = iptables::new(false)?;
+
+        for port in ports {
+            let rule = format!(
+                "-p tcp --dport {} -j DNAT --to-destination {}:{}",
+                port.host, container_ip, port.container
+            );
+
+            if ipt.exists("nat", "POSTROUTING", rule.as_str())? {
+                ipt.delete("nat", "POSTROUTING", rule.as_str())?;
+                println!(
+                    "[IPTABLES] Deleted port route for ports {}:{}",
+                    port.host, port.container
+                );
+            }
+
+            let forward_rule = format!(
+                "-p tcp -d {} --dport {} -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT",
+                container_ip, port.container
+            );
+
+            if ipt.exists("filter", "FORWARD", forward_rule.as_str())? {
+                ipt.delete("filter", "FORWARD", forward_rule.as_str())?;
+                println!(
+                    "[IPTABLES] Deleted forward rule for container's ip {} and port {}",
+                    container_ip, port.container
+                )
+            }
+
+            let output_rule = format!(
+                "-p tcp -o lo --dport {} -j DNAT --to-destination {}:{}",
+                port.host, container_ip, port.container
+            );
+
+            if ipt.exists("nat", "OUTPUT", output_rule.as_str())? {
+                ipt.delete("nat", "OUTPUT", output_rule.as_str())?;
+                println!(
+                    "[IPTABLES] Deleted output rule for ports {}:{}",
+                    port.host, port.container
+                )
+            }
+        }
         Ok(())
     }
 

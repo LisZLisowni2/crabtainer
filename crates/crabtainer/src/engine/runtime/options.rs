@@ -1,7 +1,7 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use clap::ValueEnum;
 
 #[derive(Debug)]
 pub struct ContainerOptions {
@@ -12,6 +12,7 @@ pub struct ContainerOptions {
     pub container_name: Option<String>,
     pub restart_policy: RestartPolicy,
     pub rm: bool,
+    pub ports: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -52,6 +53,7 @@ pub struct RuntimeConfig {
     pub boot_id: String,
     pub is_detached: bool,
     pub rm: bool,
+    pub ports: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, ValueEnum, PartialEq, Eq)]
@@ -60,5 +62,5 @@ pub enum RestartPolicy {
     Never,
     OnFailure,
     UnlessStopped,
-    Always
+    Always,
 }

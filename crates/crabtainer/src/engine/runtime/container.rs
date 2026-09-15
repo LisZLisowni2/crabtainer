@@ -6,7 +6,7 @@ use crate::engine::support::paths::CrabtainerPaths;
 use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, clone};
-use nix::sys::signal::{Signal};
+use nix::sys::signal::Signal;
 use nix::sys::stat::Mode;
 use nix::unistd::{
     ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, sethostname, setsid,
@@ -213,7 +213,11 @@ pub async fn spawn_detach_container(
                     .parent()
                     .unwrap()
                     .join("crabtainer_init");
-                fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.crabtainer_init");
+                fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&container_init_path)
+                    .expect("[ERROR] Failed to open dev/.crabtainer_init");
 
                 mount(
                     Some(container_init_localization.to_str().unwrap()),
@@ -221,7 +225,8 @@ pub async fn spawn_detach_container(
                     None::<&str>,
                     MsFlags::MS_BIND | MsFlags::MS_RDONLY,
                     None::<&str>,
-                ).expect("[ERROR] Failed to mount init program");
+                )
+                .expect("[ERROR] Failed to mount init program");
 
                 stdout
                     .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
@@ -232,7 +237,7 @@ pub async fn spawn_detach_container(
                     args: args.clone(),
                     quota: Some(cpu_limit),
                     memory_limit: Some(memory_limit),
-                    restart_policy: opts.restart_policy.clone()
+                    restart_policy: opts.restart_policy.clone(),
                 };
 
                 let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -296,6 +301,7 @@ pub async fn spawn_detach_container(
                     memory_limit,
                     args: args.clone(),
                     rm: opts.rm,
+                    ports: opts.ports.clone(),
                 };
 
                 fs::write(
@@ -331,6 +337,15 @@ pub async fn spawn_detach_container(
                     if let Err(e) = setup_res {
                         eprintln!("[WARN] Failed to attach container: {}", e);
                     }
+
+                    let ports = network_manager
+                        .handle_ports(opts.ports.clone())
+                        .await
+                        .expect("Failed to handle ports");
+                    network_manager
+                        .add_portforwarding(ports, assigned_ip)
+                        .await
+                        .expect("Failed to enable portforwarding");
                 });
 
                 let container_workdir_clone = container_workdir.clone();
@@ -356,6 +371,15 @@ pub async fn spawn_detach_container(
                         }
                         Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
                     };
+
+                    let ports = network_manager
+                        .handle_ports(opts.ports)
+                        .await
+                        .expect("Failed to handle ports");
+                    network_manager
+                        .remove_portforwarding(ports, assigned_ip)
+                        .await
+                        .expect("Failed to enable portforwarding");
 
                     tokio::task::spawn_blocking(move || {
                         if let Err(e) = fs::remove_dir(&cgroup_dir) {
@@ -411,7 +435,7 @@ pub async fn spawn_detach_container(
                     Ok(0)
                 });
 
-                if let Err(_) = exit_code {
+                if exit_code.is_err() {
                     runtime_config.status = ContainerStatus::Error;
                 } else if let Ok(code) = exit_code {
                     if code == 143 {
@@ -546,7 +570,11 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .parent()
         .unwrap()
         .join("crabtainer_init");
-    fs::OpenOptions::new().create(true).write(true).open(&container_init_path).expect("[ERROR] Failed to open dev/.crabtainer_init");
+    fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&container_init_path)
+        .expect("[ERROR] Failed to open dev/.crabtainer_init");
 
     mount(
         Some(container_init_localization.to_str().unwrap()),
@@ -554,7 +582,8 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_RDONLY,
         None::<&str>,
-    ).expect("[ERROR] Failed to mount init program");
+    )
+    .expect("[ERROR] Failed to mount init program");
 
     println!("[HOST] Starting container {}", container_id);
 
@@ -592,6 +621,15 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
 
+    let ports = network_manager
+        .handle_ports(opts.ports.clone())
+        .await
+        .expect("Failed to handle ports");
+    network_manager
+        .add_portforwarding(ports, assigned_ip)
+        .await
+        .expect("Failed to create portforwarding");
+
     let container_name = if let Some(name) = &opts.container_name {
         name.clone()
     } else {
@@ -617,6 +655,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         cpu_limit,
         memory_limit,
         rm: opts.rm,
+        ports: opts.ports.clone(),
     };
 
     fs::write(
@@ -630,35 +669,43 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     if let Err(e) = network_manager
         .attach_container(container_id.as_str(), child_pid.as_raw(), assigned_ip)
         .await
-        .map_err(|e| e.to_string()) {
+        .map_err(|e| e.to_string())
+    {
         eprintln!("[WARN] Failed to attach network: {}", e);
     }
 
-    let is_error = tokio::task::spawn_blocking(move || match nix::sys::wait::waitpid(child_pid, None) {
-        Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
-            println!("[INFO] Container exited with code {}", status);
-            if status != 0 {
-                eprintln!(
-                    "[INFO] Container process failed with exit code: {}",
-                    status,
-                );
+    let is_error =
+        tokio::task::spawn_blocking(move || match nix::sys::wait::waitpid(child_pid, None) {
+            Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
+                println!("[INFO] Container exited with code {}", status);
+                if status != 0 {
+                    eprintln!("[INFO] Container process failed with exit code: {}", status,);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
+                eprintln!("Container process exited with signal {:?}", sig);
                 Ok(true)
-            } else {
+            }
+            Ok(status) => {
+                println!("[INFO] Container proceed changed state: {:?}", status);
                 Ok(false)
             }
-        }
-        Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
-            eprintln!("Container process exited with signal {:?}", sig);
-            Ok(true)
-        }
-        Ok(status) => {
-            println!("[INFO] Container proceed changed state: {:?}", status);
-            Ok(false)
-        }
-        Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
-    })
-    .await
-    .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))??;
+            Err(e) => Err(format!("[ERROR] Error waiting for child process: {:?}", e)),
+        })
+        .await
+        .map_err(|e| format!("[ERROR] Error waiting for child process: {}", e))??;
+
+    let ports2 = network_manager
+        .handle_ports(opts.ports.clone())
+        .await
+        .expect("Failed to handle ports");
+    network_manager
+        .remove_portforwarding(ports2, assigned_ip)
+        .await
+        .expect("Failed to remove portforwarding");
 
     let released_ip = ipam
         .release(&container_id)
@@ -817,9 +864,9 @@ fn child_process(
             .map(|arg| {
                 CString::new(arg.as_str()).expect("[CHILD ERROR] Failed to convert arg to CString")
             })
-            .collect::<Vec<CString>>()
+            .collect::<Vec<CString>>(),
     );
-    
+
     match execvp(&cmd_cstring, &args_cstring) {
         Ok(_) => unreachable!(),
         Err(e) => {
