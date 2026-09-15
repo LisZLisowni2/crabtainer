@@ -28,7 +28,11 @@ impl CrabtainerIgnore {
                     (line, false)
                 };
 
-                let base = raw_pattern.trim_start_matches('/');
+                let base_trim = raw_pattern.trim_start_matches('/');
+                let base_path = root.join(base_trim);
+                let base = base_path
+                    .to_str()
+                    .expect("Failed to cast from PathBuf to &str");
 
                 let mut builder = GlobSetBuilder::new();
 

@@ -1,15 +1,60 @@
 use crate::engine::support::paths::CrabtainerPaths;
+use nix::mount::{MsFlags, mount, umount};
 use nix::unistd::{chdir, chroot};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
+
+async fn pseudo_filesystems_mount(rootfs: &std::path::Path) -> Result<(), String> {
+    mount(
+        Some("proc"),
+        &rootfs.join("proc"),
+        Some("proc"),
+        MsFlags::empty(),
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+
+    mount(
+        Some("sysfs"),
+        &rootfs.join("sys"),
+        Some("sysfs"),
+        MsFlags::empty(),
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+
+    mount(
+        Some("/dev"),
+        &rootfs.join("dev"),
+        None::<&str>,
+        MsFlags::MS_BIND,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+async fn pseudo_filesystems_umount(rootfs: &std::path::Path) -> Result<(), String> {
+    let targets = [
+        (rootfs.join("proc")),
+        (rootfs.join("sys")),
+        (rootfs.join("dev")),
+    ];
+
+    for target in targets {
+        umount(&target)
+            .map_err(|e| format!("Failed to umount target {}: {}", target.display(), e))
+            .expect("Failed to run umount");
+    }
+    Ok(())
+}
 
 pub async fn run_in_container(
     output_layout_name: &String,
     workdir: Option<String>,
     command: String,
 ) -> Result<(), String> {
-    println!(" => [RUN] Running '{}' command in container", command);
-
     let rootfs_path = CrabtainerPaths::layout_store_dir()
         .join(output_layout_name)
         .join("rootfs");
@@ -29,17 +74,23 @@ pub async fn run_in_container(
         "/".to_string()
     };
 
+    pseudo_filesystems_mount(&rootfs_path).await?;
+    let rootfs_path_clone = rootfs_path.clone();
+
     let status = unsafe {
         Command::new("/bin/sh")
             .arg("-c")
             .arg(&command)
             .pre_exec(move || {
-                chroot(rootfs_path.as_path())?;
+                chdir(rootfs_path.as_path())?;
+                chroot(".")?;
                 chdir(workdir_final.as_str())?;
                 Ok(())
             })
             .status()
     };
+
+    pseudo_filesystems_umount(&rootfs_path_clone).await?;
 
     match status {
         Ok(s) if s.success() => Ok(()),
