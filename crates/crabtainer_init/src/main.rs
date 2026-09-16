@@ -1,10 +1,10 @@
-use std::process::{Command, ExitCode};
 use nix::sys::signal::{Signal, kill};
-use nix::sys::wait::{waitpid, WaitStatus};
+use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::Pid;
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::env;
+use std::process::{Command, ExitCode};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -14,9 +14,7 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let child = match Command::new(&args[1])
-        .args(&args[2..])
-        .spawn() {
+    let child = match Command::new(&args[1]).args(&args[2..]).spawn() {
         Ok(child) => child,
         Err(e) => {
             eprintln!("[CRABTAINER-INIT] Failed to exec '{}': {}", args[1], e);

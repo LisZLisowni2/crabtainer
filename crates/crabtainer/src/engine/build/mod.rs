@@ -8,6 +8,6 @@
 //!   `RUN`).
 
 pub mod builder;
-pub mod instructions;
 pub mod crabtainerfile;
+pub mod instructions;
 pub mod spec;

@@ -316,7 +316,7 @@ async fn main() {
                         return;
                     }
 
-                    if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
+                    if let Err(e) = std::fs::remove_dir_all(store.join(&tag)) {
                         eprintln!("[WARN] Failed to remove layout {}: {}", tag, e);
                     };
                 } else {
@@ -345,7 +345,7 @@ async fn main() {
                                     let name = path.file_name().unwrap().to_str().unwrap();
 
                                     if !container_layout_hashset.contains(name)
-                                        && let Err(e) = std::fs::remove_dir_all(&store.join(&tag))
+                                        && let Err(e) = std::fs::remove_dir_all(store.join(&tag))
                                     {
                                         eprintln!("[WARN] Failed to remove image {}: {}", tag, e);
                                     };
@@ -603,7 +603,7 @@ async fn search_id_by_name(name: String) -> Option<String> {
     for entry in entries.flatten() {
         let path = entry.path();
 
-        let config_content = std::fs::read_to_string(&path.join("config.json"))
+        let config_content = std::fs::read_to_string(path.join("config.json"))
             .expect("[ERROR] Failed to read config");
         let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
             Ok(cfg) => cfg,
@@ -629,7 +629,7 @@ where
             Ok(config) => {
                 target_pid = config.pid;
             }
-            Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", &id),
+            Err(_) => eprintln!("[WARN] Failed to retrieve data for {}", id),
         }
     }
 

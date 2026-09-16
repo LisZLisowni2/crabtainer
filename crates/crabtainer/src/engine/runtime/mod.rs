@@ -7,12 +7,12 @@
 //! - [`cgroups`] — cgroup v2 resource limits and process attachment.
 //! - [`network`] — bridge networking and IP allocation (IPAM).
 
+pub mod autostart;
 pub mod cgroups;
 pub mod container;
 pub mod exec;
 pub mod network;
 pub mod options;
 pub mod refresh;
-pub mod stop;
-pub mod autostart;
 pub mod start;
+pub mod stop;

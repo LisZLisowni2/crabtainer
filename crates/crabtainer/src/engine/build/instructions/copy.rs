@@ -6,6 +6,7 @@ use walkdir::WalkDir;
 
 pub struct CrabtainerIgnore {
     rules: Vec<(GlobSet, bool)>,
+    root: PathBuf,
 }
 
 impl CrabtainerIgnore {
@@ -56,11 +57,11 @@ impl CrabtainerIgnore {
             }
         }
 
-        Self { rules }
+        Self { root, rules }
     }
 
     pub fn is_ignored(&self, absolute_path: &Path) -> bool {
-        if absolute_path == Path::new(&absolute_path.join(".crabtainerignore")) {
+        if absolute_path == self.root.join(".crabtainerignore") {
             return true;
         }
 
@@ -128,7 +129,7 @@ pub async fn copy_to_layout(
         ignore.extend(splited);
     }
 
-    let ignore_engine = CrabtainerIgnore::new(&build_dir);
+    let ignore_engine = CrabtainerIgnore::new(build_dir);
 
     // Case 1: Universal wildcard (Copy entire workspace respecting ignores)
     if src == "*" {
@@ -138,7 +139,7 @@ pub async fn copy_to_layout(
             let rel_path = src_path
                 .strip_prefix(build_dir)
                 .expect("Failed to strip prefix");
-            let target_path = destination.join(&rel_path);
+            let target_path = destination.join(rel_path);
 
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
@@ -189,12 +190,12 @@ pub async fn copy_to_layout(
 
         if src_path.is_dir() {
             // Recursively collect and copy directory contents
-            let files = ignore_engine.collect_files(&conjoin_path.as_path());
+            let files = ignore_engine.collect_files(conjoin_path.as_path());
             for absolute_file in files {
                 let rel_file = absolute_file
-                    .strip_prefix(&build_dir)
+                    .strip_prefix(build_dir)
                     .expect("Failed to strip prefix");
-                let target_path = destination.join(&rel_file);
+                let target_path = destination.join(rel_file);
                 if let Some(parent) = target_path.parent() {
                     fs::create_dir_all(parent).map_err(|e| {
                         format!(
@@ -204,16 +205,16 @@ pub async fn copy_to_layout(
                         )
                     })?;
                 }
-                fs::copy(&rel_file, &target_path).map_err(|e| {
+                fs::copy(rel_file, &target_path).map_err(|e| {
                     format!(" => [COPY] Failed to copy {}: {}", rel_file.display(), e)
                 })?;
             }
         } else if conjoin_path.is_file() {
             // Replicate relative structure under destination
             let rel_path = conjoin_path
-                .strip_prefix(&build_dir)
+                .strip_prefix(build_dir)
                 .expect("Failed to strip prefix");
-            let target_path = destination.join(&rel_path);
+            let target_path = destination.join(rel_path);
 
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
@@ -255,6 +256,13 @@ mod tests {
         let mut files = ig.collect_files(root);
         files.sort();
         files
+            .into_iter()
+            .map(|f| {
+                f.strip_prefix(root)
+                    .expect("Failed to strip prefix")
+                    .to_path_buf()
+            })
+            .collect()
     }
 
     #[test]
