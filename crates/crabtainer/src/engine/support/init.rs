@@ -32,9 +32,23 @@ pub async fn enable_route_localnet() {
     let file_path = "/etc/sysctl.d/99-crabtainer.conf";
     let content = "net.ipv4.conf.all.route_localnet = 1";
 
+    tokio::fs::create_dir_all("/etc/sysctl.d")
+        .await
+        .expect("Failed to create sysctl.d");
+
     tokio::fs::write(file_path, content.as_bytes())
         .await
         .expect("Failed to write sysctl rule");
+
+    match tokio::process::Command::new("sysctl")
+        .arg("-p")
+        .arg("/etc/sysctl.d/99-crabtainer.conf")
+        .status()
+        .await
+    {
+        Ok(_) => println!("Successfully edited sysctl rule"),
+        Err(e) => eprintln!("Failed to edit sysctl rule: {}", e),
+    };
 }
 
 pub async fn init_crabtainer_system_config() -> Result<(), String> {
