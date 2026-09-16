@@ -416,24 +416,11 @@ impl NetworkManager {
         Ok(parsed_ports)
     }
 
-    pub async fn enable_route_localnet(&self) {
-        let status = tokio::process::Command::new("sysctl")
-            .arg("net.ipv4.conf.all.route_localnet=1")
-            .status()
-            .await
-            .expect("Failed to run sysctl command");
-
-        if status.success() {
-            println!("[SYSCTL] Successfully enabled route_localnet parameter");
-        }
-    }
-
     pub async fn add_port_forwarding(
         &self,
         ports: Vec<PortForwarding>,
         container_ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.enable_route_localnet().await;
         let ipt = iptables::new(false)?;
 
         for port in ports {
