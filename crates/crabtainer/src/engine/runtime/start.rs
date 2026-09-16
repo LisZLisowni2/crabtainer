@@ -6,7 +6,7 @@ async fn retrieve_config(
     container_id: &String,
 ) -> Result<RuntimeConfig, Box<dyn std::error::Error>> {
     let config_path = CrabtainerPaths::runtime_dir()
-        .join(&container_id)
+        .join(container_id)
         .join("config.json");
     let content = std::fs::read_to_string(config_path)?;
     let config = match serde_json::from_str(&content) {

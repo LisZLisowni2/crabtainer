@@ -170,7 +170,7 @@ pub async fn spawn_detach_container(
                     .write_all(
                         format!(
                             "[IPAM] Assigned IP for container {}: {}\n",
-                            &container_id, assigned_ip
+                            container_id, assigned_ip
                         )
                         .as_bytes(),
                     )
@@ -241,6 +241,7 @@ pub async fn spawn_detach_container(
                     .join("crabtainer_init");
                 fs::OpenOptions::new()
                     .create(true)
+                    .truncate(true)
                     .write(true)
                     .open(&container_init_path)
                     .expect("[ERROR] Failed to open dev/.crabtainer_init");
@@ -440,7 +441,7 @@ pub async fn spawn_detach_container(
                         Ok(released_ip) => {
                             println!(
                                 "[INFO] Released ip for container {}: {}",
-                                &container_id, released_ip
+                                container_id, released_ip
                             );
                         }
                         Err(e) => eprintln!("[WARN] Failed to release IP of container: {}", e),
@@ -565,7 +566,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     println!(
         "[IPAM] Assigned IP for container {}: {}",
-        &container_id, assigned_ip
+        container_id, assigned_ip
     );
 
     let ports = network_manager
@@ -642,6 +643,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .join("crabtainer_init");
     fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&container_init_path)
         .expect("[ERROR] Failed to open dev/.crabtainer_init");
@@ -775,7 +777,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .map_err(|e| e.to_string())?;
     println!(
         "[IPAM] Released IP for container {}: {}",
-        &container_id, released_ip
+        container_id, released_ip
     );
 
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
@@ -952,18 +954,21 @@ mod tests {
     #[test]
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
-        assert_eq!(resolve_args(&vec![], &layout_args), vec!["-lh"]);
+        assert_eq!(resolve_args(&Vec::new(), &layout_args), vec!["-lh"]);
     }
 
     #[test]
     fn resolve_args_empty_layout_args_and_empty_command_args() {
-        assert!(resolve_args(&vec![], &vec![]).is_empty());
+        assert!(resolve_args(&Vec::new(), &Vec::new()).is_empty());
     }
 
     #[test]
     fn resolve_args_prefers_provided_args() {
         let args: Vec<String> = vec!["-lh".to_string()];
-        assert_eq!(resolve_args(&vec!["aux".to_string()], &args), vec!["aux"]);
+        assert_eq!(
+            resolve_args(&Vec::from(["aux".to_string()]), &args),
+            vec!["aux"]
+        );
     }
 
     #[test]
