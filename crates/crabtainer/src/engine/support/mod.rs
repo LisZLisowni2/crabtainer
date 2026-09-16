@@ -6,6 +6,6 @@
 
 pub mod paths;
 
+pub mod systemd;
 #[cfg(test)]
 pub mod test_utils;
-pub mod systemd;
