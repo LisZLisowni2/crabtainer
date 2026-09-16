@@ -110,7 +110,7 @@ enum Commands {
 #[derive(Subcommand)]
 enum SystemActions {
     Prune,
-    InitSystemd,
+    Init,
     Autostart,
 }
 
@@ -563,8 +563,8 @@ async fn main() {
         }
         Commands::System { action } => match action {
             SystemActions::Prune => {}
-            SystemActions::InitSystemd => {
-                crabtainer::engine::support::systemd::init_systemd_config()
+            SystemActions::Init => {
+                crabtainer::engine::support::init::init_crabtainer_system_config()
                     .await
                     .unwrap();
             }

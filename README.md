@@ -15,6 +15,7 @@ Objectives are to achive lightweight and fast image builder and runtime.
 ## How to run
 
 ### Requirements
+
 - Linux
 - Cgroups v2
 - Rust toolchain
@@ -28,10 +29,16 @@ Objectives are to achive lightweight and fast image builder and runtime.
 cargo build --release
 ```
 
+### Initialize
+
+```bash
+sudo ./target/release/crabtainer system init
+```
+
 ### Running
 
 ```bash
-sudo ./target/release/core
+sudo ./target/release/crabtainer
 ```
 
 ## LICENSE
@@ -40,7 +47,7 @@ The license for this project is based on APACHE 2.0 license. Look at [license](L
 
 ## Contribution and AI policy
 
-You're welcome if you want to contribute. Look at [CONTRIBUTING.md](CONTRIBUTING.md) for further information. 
+You're welcome if you want to contribute. Look at [CONTRIBUTING.md](CONTRIBUTING.md) for further information.
 
 ## Other
 
