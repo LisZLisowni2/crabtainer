@@ -58,8 +58,8 @@ pub fn attach_process_to_cgroup(cgroup_dir: &Path, pid: nix::unistd::Pid) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use crate::engine::runtime::options::RestartPolicy;
+    use tempfile::tempdir;
 
     fn opts(cpu: Option<i64>, mem: Option<i64>) -> ContainerReady {
         ContainerReady {
@@ -68,6 +68,7 @@ mod tests {
             quota: cpu,
             memory_limit: mem,
             restart_policy: RestartPolicy::Never,
+            workdir: "/".to_string(),
         }
     }
 

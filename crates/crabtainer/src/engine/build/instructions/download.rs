@@ -7,19 +7,42 @@ use tokio::io::AsyncWriteExt;
 pub async fn download_image_if_missing(
     image_ref: &str,
     alias: &str,
+    is_override: bool,
 ) -> Result<std::path::PathBuf, String> {
     CrabtainerPaths::init_system_dirs()?;
+
+    let image_dir = CrabtainerPaths::image_store_dir().join(alias);
+
+    if std::fs::metadata(&image_dir).is_ok() {
+        if !is_override {
+            println!(" => [INFO] [DOWNLOAD] Image exists. Exiting...");
+            return Ok(image_dir);
+        } else {
+            println!(" => [INFO] [DOWNLOAD] Overriding image...");
+            std::fs::remove_dir_all(&image_dir).map_err(|e| {
+                format!(
+                    "=> [ERROR] [DOWNLOAD] Failed to delete old image dir: {}",
+                    e
+                )
+            })?;
+        }
+    }
 
     let reference: oci_client::Reference = image_ref
         .parse()
         .map_err(|e| format!(" => [ERROR] [DOWNLOAD] Invalid image reference: {}", e))?;
 
-    let image_dir = CrabtainerPaths::image_store_dir().join(alias);
+    std::fs::create_dir_all(&image_dir).map_err(|e| {
+        format!(
+            "=> [ERROR] [DOWNLOAD] Failed to create image directory: {}",
+            e
+        )
+    })?;
 
-    std::fs::create_dir_all(&image_dir)
-        .map_err(|e| format!("=> [ERROR] [DOWNLOAD] Failed to create image directory: {}", e))?;
-
-    println!(" => [INFO] [DOWNLOAD] Connecting to registry for {}...", image_ref);
+    println!(
+        " => [INFO] [DOWNLOAD] Connecting to registry for {}...",
+        image_ref
+    );
 
     let client = Client::new(ClientConfig::default());
     let auth = RegistryAuth::Anonymous;
@@ -33,7 +56,10 @@ pub async fn download_image_if_missing(
     std::fs::write(image_dir.join("config.json"), config_json)
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
-    println!(" => [INFO] [DOWNLOAD] Pulling {} layers...", manifest.layers.len());
+    println!(
+        " => [INFO] [DOWNLOAD] Pulling {} layers...",
+        manifest.layers.len()
+    );
     for (i, layer) in manifest.layers.iter().enumerate() {
         let layer_filename = format!("layer_{}.tar.gz", i);
         let layer_path = image_dir.join(&layer_filename);
@@ -78,8 +104,8 @@ mod tests {
         let home = dir.path().to_str().unwrap().to_string();
 
         with_home(&home, || {
-            let err =
-                futures::executor::block_on(download_image_if_missing("", "alias")).unwrap_err();
+            let err = futures::executor::block_on(download_image_if_missing("", "alias", false))
+                .unwrap_err();
             assert!(
                 err.contains("Invalid image reference"),
                 "unexpected error: {}",

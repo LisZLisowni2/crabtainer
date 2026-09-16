@@ -1,0 +1,11 @@
+DOWNLOAD ghcr.io/astral-sh/uv:python3.14-trixie-slim AS python-uv OVERRIDE
+
+FROM python-uv
+
+WORKDIR /app
+
+COPY * ~
+
+RUN uv sync
+
+CMD uv run run.py

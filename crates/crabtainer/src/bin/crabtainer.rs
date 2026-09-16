@@ -40,6 +40,9 @@ enum Commands {
         #[arg(short = 'C', long)]
         cpu_limit: Option<f64>,
 
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        port: Vec<String>,
+
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
@@ -114,9 +117,18 @@ enum SystemActions {
 #[derive(Subcommand)]
 enum ImageActions {
     Ps,
-    Rm { name: String },
-    Pull { image: String, alias: String },
-    Inspect { name: String },
+    Rm {
+        name: String,
+    },
+    Pull {
+        image: String,
+        alias: String,
+        #[arg(short, long, default_value_t = false)]
+        overriding: bool,
+    },
+    Inspect {
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -145,6 +157,7 @@ async fn main() {
             rm,
             name,
             detach,
+            port,
         } => {
             let mut final_command: Vec<String> = vec![];
 
@@ -164,6 +177,7 @@ async fn main() {
                 container_name: name,
                 rm,
                 restart_policy: restart,
+                ports: port,
             };
 
             let container_id = crabtainer::engine::runtime::container::generate_container_id();
@@ -230,10 +244,15 @@ async fn main() {
                     }
                 }
             }
-            ImageActions::Pull { image, alias } => {
+            ImageActions::Pull {
+                image,
+                alias,
+                overriding,
+            } => {
                 crabtainer::engine::build::instructions::download::download_image_if_missing(
                     image.as_str(),
                     alias.as_str(),
+                    overriding,
                 )
                 .await
                 .unwrap();
@@ -283,11 +302,10 @@ async fn main() {
 
                         if let Ok(content) = std::fs::read_to_string(&config_path)
                             && let Ok(config) = serde_json::from_str::<RuntimeConfig>(&content)
+                            && config.layout_name == tag
                         {
-                            if config.layout_name == tag {
-                                is_found = true;
-                                break;
-                            }
+                            is_found = true;
+                            break;
                         }
                     }
 
@@ -326,14 +344,11 @@ async fn main() {
                                     let path = entry.path();
                                     let name = path.file_name().unwrap().to_str().unwrap();
 
-                                    if !container_layout_hashset.contains(name) {
-                                        if let Err(e) = std::fs::remove_dir_all(&store.join(&tag)) {
-                                            eprintln!(
-                                                "[WARN] Failed to remove image {}: {}",
-                                                tag, e
-                                            );
-                                        };
-                                    }
+                                    if !container_layout_hashset.contains(name)
+                                        && let Err(e) = std::fs::remove_dir_all(&store.join(&tag))
+                                    {
+                                        eprintln!("[WARN] Failed to remove image {}: {}", tag, e);
+                                    };
                                 }
                             }
                             Ok(Key::Char('n')) => {
@@ -655,6 +670,10 @@ mod tests {
             "-r",
             "always",
             "-d",
+            "-p",
+            "1920:1920",
+            "-p",
+            "2952:2952",
             "-C",
             "1.5",
             "-M",
@@ -672,6 +691,7 @@ mod tests {
                 detach,
                 rm,
                 restart,
+                port,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -682,6 +702,7 @@ mod tests {
                 assert_eq!(name, Some("MyContainer".to_string()));
                 assert_eq!(rm, true);
                 assert_eq!(restart, RestartPolicy::Always);
+                assert_eq!(port, vec!["1920:1920", "2952:2952"]);
             }
             _ => panic!("expected Run command"),
         }
@@ -700,6 +721,7 @@ mod tests {
                 detach,
                 rm,
                 restart,
+                port,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
@@ -710,6 +732,7 @@ mod tests {
                 assert_eq!(name, None);
                 assert_eq!(rm, false);
                 assert_eq!(restart, RestartPolicy::Never);
+                assert_eq!(port, Vec::<String>::new());
             }
             _ => panic!("expected Run command"),
         }

@@ -1,6 +1,8 @@
 use crate::engine::runtime::container::spawn_detach_container;
 use crate::engine::runtime::network::Ipam;
-use crate::engine::runtime::options::{ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig};
+use crate::engine::runtime::options::{
+    ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig,
+};
 use crate::engine::support::paths::CrabtainerPaths;
 
 pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,11 +21,7 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
         let path = entry?.path();
         let config_path = path.join("config.json");
 
-        let container_id = path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let container_id = path.file_name().unwrap().to_string_lossy().to_string();
 
         let _ = ipam.release(&container_id).await;
 
@@ -37,12 +35,13 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
             Err(_) => continue,
         };
 
-        let should_autostart = config.is_detached && match config.restart_policy {
-            RestartPolicy::Never => false,
-            RestartPolicy::Always => config.status != ContainerStatus::Stopped,
-            RestartPolicy::UnlessStopped => config.status != ContainerStatus::Stopped,
-            RestartPolicy::OnFailure => config.status == ContainerStatus::Error
-        };
+        let should_autostart = config.is_detached
+            && match config.restart_policy {
+                RestartPolicy::Never => false,
+                RestartPolicy::Always => config.status != ContainerStatus::Stopped,
+                RestartPolicy::UnlessStopped => config.status != ContainerStatus::Stopped,
+                RestartPolicy::OnFailure => config.status == ContainerStatus::Error,
+            };
 
         if should_autostart {
             let opts: ContainerOptions = ContainerOptions {
@@ -53,6 +52,7 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
                 cpu_limit: Some(config.cpu_limit as f64),
                 memory_limit: Some(config.memory_limit as f64),
                 rm: config.rm,
+                ports: config.ports,
             };
 
             if let Err(e) = spawn_detach_container(opts, container_id).await {
@@ -63,3 +63,4 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
