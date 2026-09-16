@@ -6,6 +6,7 @@ use walkdir::WalkDir;
 
 pub struct CrabtainerIgnore {
     rules: Vec<(GlobSet, bool)>,
+    root: PathBuf,
 }
 
 impl CrabtainerIgnore {
@@ -56,11 +57,11 @@ impl CrabtainerIgnore {
             }
         }
 
-        Self { rules }
+        Self { root, rules }
     }
 
     pub fn is_ignored(&self, absolute_path: &Path) -> bool {
-        if absolute_path == Path::new(&absolute_path.join(".crabtainerignore")) {
+        if absolute_path == self.root.join(".crabtainerignore") {
             return true;
         }
 
@@ -255,6 +256,13 @@ mod tests {
         let mut files = ig.collect_files(root);
         files.sort();
         files
+            .into_iter()
+            .map(|f| {
+                f.strip_prefix(root)
+                    .expect("Failed to strip prefix")
+                    .to_path_buf()
+            })
+            .collect()
     }
 
     #[test]
