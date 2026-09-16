@@ -107,13 +107,6 @@ pub async fn spawn_detach_container(
                 )
                 .expect("[HOST] Failed to open container.log");
 
-                let error_fd = nix::fcntl::open(
-                    runtime_path.join("error.log").as_path(),
-                    OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_APPEND,
-                    Mode::from_bits_truncate(644),
-                )
-                .expect("[HOST] Failed to open error.log");
-
                 let dev_null = nix::fcntl::open(
                     PathBuf::from("/dev/null").as_path(),
                     OFlag::O_RDONLY,
@@ -123,7 +116,7 @@ pub async fn spawn_detach_container(
 
                 dup2_stdin(&dev_null).expect("[HOST] Failed to dup2 stdin");
                 dup2_stdout(&log_fd).expect("[HOST] Failed to dup2 stdout");
-                dup2_stderr(&error_fd).expect("[HOST] Failed to dup2 stderr");
+                dup2_stderr(&log_fd).expect("[HOST] Failed to dup2 stderr");
 
                 const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
                 let layout_dir = CrabtainerPaths::layout_store_dir().join(&opts.layout_name);
@@ -160,6 +153,12 @@ pub async fn spawn_detach_container(
                     .and_then(|l| l.resources().as_ref())
                     .and_then(|r| r.memory().as_ref())
                     .and_then(|m| m.limit());
+
+                let cwd = layout_opts
+                    .process()
+                    .as_ref()
+                    .and_then(|p| p.cwd().to_str())
+                    .unwrap_or("/");
 
                 let args = resolve_args(&opts.args, default_args.unwrap());
 
@@ -206,6 +205,33 @@ pub async fn spawn_detach_container(
                 )
                 .expect("[ERROR] Failed to mount overlayfs");
 
+                mount(
+                    Some("proc"),
+                    &merged_rootfs.join("proc"),
+                    Some("proc"),
+                    MsFlags::empty(),
+                    None::<&str>,
+                )
+                .expect("Failed to mount /proc to container");
+
+                mount(
+                    Some("sysfs"),
+                    &merged_rootfs.join("sys"),
+                    Some("sysfs"),
+                    MsFlags::empty(),
+                    None::<&str>,
+                )
+                .expect("Failed to mount /proc to container");
+
+                mount(
+                    Some("/dev"),
+                    &merged_rootfs.join("dev"),
+                    None::<&str>,
+                    MsFlags::MS_BIND,
+                    None::<&str>,
+                )
+                .expect("Failed to mount /proc to container");
+
                 // Volumes & bind mounts
                 let container_init_path = merged_rootfs.join("dev/.crabtainer_init");
                 let container_init_localization = std::env::current_exe()
@@ -238,6 +264,7 @@ pub async fn spawn_detach_container(
                     quota: Some(cpu_limit),
                     memory_limit: Some(memory_limit),
                     restart_policy: opts.restart_policy.clone(),
+                    workdir: cwd.to_string(),
                 };
 
                 let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -320,6 +347,15 @@ pub async fn spawn_detach_container(
                     .expect("[ERROR] Failed to create tokio runtime");
 
                 rt.block_on(async {
+                    let ports = network_manager
+                        .handle_ports(opts.ports.clone())
+                        .await
+                        .expect("Failed to handle ports");
+                    network_manager
+                        .add_port_forwarding(ports, assigned_ip)
+                        .await
+                        .expect("Failed to enable portforwarding");
+
                     let (conn, handle, _) = rtnetlink::new_connection().unwrap();
                     let conn_handle = tokio::spawn(conn);
 
@@ -337,15 +373,6 @@ pub async fn spawn_detach_container(
                     if let Err(e) = setup_res {
                         eprintln!("[WARN] Failed to attach container: {}", e);
                     }
-
-                    let ports = network_manager
-                        .handle_ports(opts.ports.clone())
-                        .await
-                        .expect("Failed to handle ports");
-                    network_manager
-                        .add_portforwarding(ports, assigned_ip)
-                        .await
-                        .expect("Failed to enable portforwarding");
                 });
 
                 let container_workdir_clone = container_workdir.clone();
@@ -377,7 +404,7 @@ pub async fn spawn_detach_container(
                         .await
                         .expect("Failed to handle ports");
                     network_manager
-                        .remove_portforwarding(ports, assigned_ip)
+                        .remove_port_forwarding(ports, assigned_ip)
                         .await
                         .expect("Failed to enable portforwarding");
 
@@ -519,6 +546,12 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .and_then(|r| r.memory().as_ref())
         .and_then(|m| m.limit());
 
+    let cwd = layout_opts
+        .process()
+        .as_ref()
+        .and_then(|p| p.cwd().to_str())
+        .unwrap_or("/");
+
     let args = resolve_args(&opts.args, default_args.unwrap());
 
     let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
@@ -534,6 +567,15 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         "[IPAM] Assigned IP for container {}: {}",
         &container_id, assigned_ip
     );
+
+    let ports = network_manager
+        .handle_ports(opts.ports.clone())
+        .await
+        .expect("Failed to handle ports");
+    network_manager
+        .add_port_forwarding(ports, assigned_ip)
+        .await
+        .expect("Failed to create port forwarding");
 
     let container_workdir = CrabtainerPaths::runtime_dir().join(&container_id);
 
@@ -552,8 +594,9 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         work_dir.to_str().unwrap()
     );
 
-    println!("[HOST] Mount overlayfs");
+    println!("[HOST] Mounting");
 
+    // Mounts
     mount(
         Some("overlay"),
         &merged_rootfs,
@@ -562,6 +605,33 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         Some(overlay_opts.as_str()),
     )
     .expect("[ERROR] Failed to mount overlayfs");
+
+    mount(
+        Some("proc"),
+        &merged_rootfs.join("proc"),
+        Some("proc"),
+        MsFlags::empty(),
+        None::<&str>,
+    )
+    .expect("Failed to mount /proc to container");
+
+    mount(
+        Some("sysfs"),
+        &merged_rootfs.join("sys"),
+        Some("sysfs"),
+        MsFlags::empty(),
+        None::<&str>,
+    )
+    .expect("Failed to mount /proc to container");
+
+    mount(
+        Some("/dev"),
+        &merged_rootfs.join("dev"),
+        None::<&str>,
+        MsFlags::MS_BIND,
+        None::<&str>,
+    )
+    .expect("Failed to mount /proc to container");
 
     // Volumes & bind mounts
     let container_init_path = merged_rootfs.join("dev/.crabtainer_init");
@@ -593,6 +663,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         quota: Some(cpu_limit),
         memory_limit: Some(memory_limit),
         restart_policy: opts.restart_policy.clone(),
+        workdir: cwd.to_string(),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -620,15 +691,6 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     if let Err(e) = attach_process_to_cgroup(&cgroup_dir, child_pid) {
         eprintln!("[WARN] Failed to attach process to cgroup: {}", e);
     };
-
-    let ports = network_manager
-        .handle_ports(opts.ports.clone())
-        .await
-        .expect("Failed to handle ports");
-    network_manager
-        .add_portforwarding(ports, assigned_ip)
-        .await
-        .expect("Failed to create portforwarding");
 
     let container_name = if let Some(name) = &opts.container_name {
         name.clone()
@@ -703,9 +765,9 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .await
         .expect("Failed to handle ports");
     network_manager
-        .remove_portforwarding(ports2, assigned_ip)
+        .remove_port_forwarding(ports2, assigned_ip)
         .await
-        .expect("Failed to remove portforwarding");
+        .expect("Failed to remove port forwarding");
 
     let released_ip = ipam
         .release(&container_id)
@@ -716,15 +778,14 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         &container_id, released_ip
     );
 
-    println!("{}", is_error);
     if let Err(e) = fs::remove_dir(&cgroup_dir) {
         eprintln!("[WARN] Error during cgroup deletion: {}", e);
     }
 
-    println!("[HOST] Umount overlayfs");
+    println!("[HOST] Umounting");
 
     if let Err(e) = umount2(&merged_rootfs, MntFlags::MNT_DETACH) {
-        eprintln!("[WARN] Failed to umount overlayfs: {}", e);
+        eprintln!("[WARN] Failed to umount: {}", e);
     }
 
     if is_error {
@@ -816,8 +877,8 @@ fn child_process(
         return 1;
     }
 
-    if let Err(e) = chdir("/") {
-        eprintln!("[CHILD ERROR] Failed to chdir root: {}", e);
+    if let Err(e) = chdir(options.workdir.as_str()) {
+        eprintln!("[CHILD ERROR] Failed to chdir to workdir: {}", e);
         return 1;
     }
 
@@ -826,19 +887,6 @@ fn child_process(
         "nameserver 1.1.1.1\nnameserver 8.8.8.8\n".as_bytes(),
     )
     .expect("[ERROR] Failed to write resolv.conf file");
-
-    let proc_target = Path::new("/proc");
-
-    if let Err(e) = mount(
-        Some("proc"),
-        proc_target,
-        Some("proc"),
-        MsFlags::empty(),
-        None::<&str>,
-    ) {
-        eprintln!("[CHILD ERROR] Failed to mount proc: {}", e);
-        return 1;
-    };
 
     umount2("/.oldroot", MntFlags::MNT_DETACH)
         .map_err(|e| eprintln!("[CHILD WARN] Failed to umount .oldroot: {}", e))

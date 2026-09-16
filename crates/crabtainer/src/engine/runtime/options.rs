@@ -22,6 +22,7 @@ pub struct ContainerReady {
     pub quota: Option<i64>,
     pub memory_limit: Option<i64>,
     pub restart_policy: RestartPolicy,
+    pub workdir: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]

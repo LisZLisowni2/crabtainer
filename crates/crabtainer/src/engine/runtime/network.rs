@@ -285,6 +285,13 @@ impl NetworkManager {
             println!("[IPTABLES] Appended CRABTAINER chain to FORWARD");
         }
 
+        let second_forward_rule = "-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT";
+
+        if !ipt.exists("filter", "FORWARD", second_forward_rule)? {
+            ipt.append("filter", "FORWARD", second_forward_rule)?;
+            println!("[IPTABLES] Added forward rule for port forwarding")
+        }
+
         Ok(())
     }
 
@@ -314,6 +321,13 @@ impl NetworkManager {
         if ipt.exists("filter", "FORWARD", &return_rule)? {
             ipt.delete("filter", "FORWARD", &return_rule)?;
             println!("[IPTABLES] Removed filter rule for {}", bridge_name);
+        }
+
+        let second_forward_rule = "-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT";
+
+        if ipt.exists("filter", "FORWARD", second_forward_rule)? {
+            ipt.append("filter", "FORWARD", second_forward_rule)?;
+            println!("[IPTABLES] Added forward rule for port forwarding")
         }
 
         Ok(())
@@ -349,6 +363,9 @@ impl NetworkManager {
          * - 3432:5835
          * - 2000-3000:2000-3000
          * */
+        /*
+         *   TODO: Handle offsets in ranges (like 2000-3000:2100-3100)
+         * */
         let mut parsed_ports: Vec<PortForwarding> = Vec::new();
 
         for port_str in ports {
@@ -363,10 +380,10 @@ impl NetworkManager {
                     let lower_bound_first = separated_first_part[0]
                         .parse::<u32>()
                         .expect("[ERROR] Failed to parse to u32 lower_bound_first");
-                    let upper_bound_first = separated_first_part[0]
+                    let upper_bound_first = separated_first_part[1]
                         .parse::<u32>()
                         .expect("[ERROR] Failed to parse to u32 upper_bound_first");
-                    let lower_bound_second = separated_second_part[1]
+                    let lower_bound_second = separated_second_part[0]
                         .parse::<u32>()
                         .expect("[ERROR] Failed to parse to u32 lower_bound_second");
                     let upper_bound_second = separated_second_part[1]
@@ -399,7 +416,7 @@ impl NetworkManager {
         Ok(parsed_ports)
     }
 
-    pub async fn add_portforwarding(
+    pub async fn add_port_forwarding(
         &self,
         ports: Vec<PortForwarding>,
         container_ip: Ipv4Addr,
@@ -412,29 +429,16 @@ impl NetworkManager {
                 port.host, container_ip, port.container
             );
 
-            if !ipt.exists("nat", "POSTROUTING", rule.as_str())? {
-                ipt.append("nat", "POSTROUTING", rule.as_str())?;
+            if !ipt.exists("nat", "PREROUTING", rule.as_str())? {
+                ipt.append("nat", "PREROUTING", rule.as_str())?;
                 println!(
                     "[IPTABLES] Added port route for ports {}:{}",
                     port.host, port.container
                 );
             }
 
-            let forward_rule = format!(
-                "-p tcp -d {} --dport {} -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT",
-                container_ip, port.container
-            );
-
-            if !ipt.exists("filter", "FORWARD", forward_rule.as_str())? {
-                ipt.append("filter", "FORWARD", forward_rule.as_str())?;
-                println!(
-                    "[IPTABLES] Added forward rule for container's ip {} and port {}",
-                    container_ip, port.container
-                )
-            }
-
             let output_rule = format!(
-                "-p tcp -o lo --dport {} -j DNAT --to-destination {}:{}",
+                "-p tcp -d 127.0.0.1/32 --dport {} -j DNAT --to-destination {}:{}",
                 port.host, container_ip, port.container
             );
 
@@ -445,11 +449,24 @@ impl NetworkManager {
                     port.host, port.container
                 )
             }
+
+            let post_rule = format!(
+                "-p tcp -d {} --dport {} -j MASQUERADE",
+                container_ip, port.container
+            );
+
+            if !ipt.exists("nat", "POSTROUTING", post_rule.as_str())? {
+                ipt.append("nat", "POSTROUTING", post_rule.as_str())?;
+                println!(
+                    "[IPTABLES] Added postrouting rule for container IP '{}' and port '{}'",
+                    container_ip, port.container
+                )
+            }
         }
         Ok(())
     }
 
-    pub async fn remove_portforwarding(
+    pub async fn remove_port_forwarding(
         &self,
         ports: Vec<PortForwarding>,
         container_ip: Ipv4Addr,
@@ -462,8 +479,8 @@ impl NetworkManager {
                 port.host, container_ip, port.container
             );
 
-            if ipt.exists("nat", "POSTROUTING", rule.as_str())? {
-                ipt.delete("nat", "POSTROUTING", rule.as_str())?;
+            if ipt.exists("nat", "PREROUTING", rule.as_str())? {
+                ipt.delete("nat", "PREROUTING", rule.as_str())?;
                 println!(
                     "[IPTABLES] Deleted port route for ports {}:{}",
                     port.host, port.container
@@ -505,7 +522,7 @@ impl NetworkManager {
         container_pid: i32,
         ip: Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if fs::read_dir(format!("/proc/{}/ns/net", container_pid)).is_err() {
+        if fs::metadata(format!("/proc/{}/ns/net", container_pid)).is_err() {
             return Ok(());
         }
 
