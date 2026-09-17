@@ -33,20 +33,6 @@ pub fn exec_with_tty(
             let mut master_read = std::fs::File::from(master_read_clone);
             let mut master_write = std::fs::File::from(master);
 
-            let stdout_thread = std::thread::spawn(move || {
-                let mut buf = [0u8; 1024];
-                let mut stdout = std::io::stdout();
-
-                while let Ok(n) = master_read.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-
-                    let _ = stdout.write_all(&buf[..n]);
-                    let _ = stdout.flush();
-                }
-            });
-
             if opts.interactive {
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 1024];
@@ -63,15 +49,29 @@ pub fn exec_with_tty(
                 });
             }
 
-            let mut status = 0;
-            unsafe {
-                nix::libc::waitpid(child.as_raw(), &mut status, 0);
-            }
+            let stdout_thread = std::thread::spawn(move || {
+                let mut buf = [0u8; 1024];
+                let mut stdout = std::io::stdout();
+
+                while let Ok(n) = master_read.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+
+                    let _ = stdout.write_all(&buf[..n]);
+                    let _ = stdout.flush();
+                }
+            });
+            //let mut status = 0;
+            //unsafe {
+            //    nix::libc::waitpid(child.as_raw(), &mut status, 0);
+            //}
 
             disable_raw_mode()?;
 
             let _ = stdout_thread.join();
-            Ok(status)
+
+            Ok(0)
         }
         ForkResult::Child => {
             drop(master);
@@ -85,6 +85,7 @@ pub fn exec_with_tty(
 
             match unsafe { fork()? } {
                 ForkResult::Parent { child } => {
+                    drop(slave);
                     let mut status = 0;
 
                     unsafe {
@@ -117,9 +118,12 @@ pub fn exec_with_tty(
                         }
                     }
 
-                    execvp(&c_cmd, &c_args)?;
+                    match execvp(&c_cmd, &c_args) {
+                        Ok(_) => unreachable!(),
+                        Err(e) => eprintln!("Failed to run command: {}", e),
+                    }
 
-                    unreachable!();
+                    Ok(0)
                 }
             }
         }
@@ -151,9 +155,12 @@ pub fn exec_with_pipes(
                 }
             }
 
-            let _ = execvp(&c_cmd, &c_args);
+            match execvp(&c_cmd, &c_args) {
+                Ok(_) => unreachable!(),
+                Err(e) => eprintln!("Failed to run command: {}", e),
+            }
 
-            unreachable!();
+            Ok(0)
         }
     }
 }
@@ -174,9 +181,9 @@ fn join_namespaces(container_pid: i32) {
     let namespaces = [
         // ("ipc", CloneFlags::CLONE_NEWIPC),
         // ("uts", CloneFlags::CLONE_NEWUTS),
-        // ("net", CloneFlags::CLONE_NEWNET),
+        ("net", CloneFlags::CLONE_NEWNET),
         ("pid", CloneFlags::CLONE_NEWPID),
-        // ("mnt", CloneFlags::CLONE_NEWNS),
+        ("mnt", CloneFlags::CLONE_NEWNS),
     ];
 
     for (ns_name, flag) in namespaces {
