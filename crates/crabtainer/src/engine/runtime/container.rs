@@ -953,14 +953,6 @@ fn child_process(
             std::process::exit(127);
         }
     }
-
-    // match execvp(&cmd_cstring, &args_cstring) {
-    //     Ok(_) => unreachable!(),
-    //     Err(e) => {
-    //         eprintln!("[CHILD ERROR] Failed to exec container command: {}", e);
-    //         std::process::exit(127);
-    //     }
-    // };
 }
 
 #[cfg(test)]
