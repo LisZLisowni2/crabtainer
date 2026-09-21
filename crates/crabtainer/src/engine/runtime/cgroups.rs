@@ -69,6 +69,7 @@ mod tests {
             memory_limit: mem,
             restart_policy: RestartPolicy::Never,
             workdir: "/".to_string(),
+            envs: vec![],
         }
     }
 

@@ -43,6 +43,9 @@ enum Commands {
         #[arg(short, long, action = clap::ArgAction::Append)]
         port: Vec<String>,
 
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        env: Vec<String>,
+
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
@@ -158,6 +161,7 @@ async fn main() {
             name,
             detach,
             port,
+            env,
         } => {
             let mut final_command: Vec<String> = vec![];
 
@@ -178,6 +182,7 @@ async fn main() {
                 rm,
                 restart_policy: restart,
                 ports: port,
+                envs: env,
             };
 
             let container_id = crabtainer::engine::runtime::container::generate_container_id();
@@ -657,13 +662,13 @@ mod tests {
     fn parse_run(args: &[&str]) -> Commands {
         let mut full = vec!["crabtainer", "run"];
         full.extend_from_slice(args);
+        println!("{:?}", full);
         Cli::try_parse_from(full).unwrap().command
     }
 
     #[test]
     fn run_parses_all_parameters() {
         match parse_run(&[
-            "my-layout",
             "-n",
             "MyContainer",
             "--rm",
@@ -674,10 +679,13 @@ mod tests {
             "1920:1920",
             "-p",
             "2952:2952",
+            "-eFALL=2",
+            "-eHAND=4",
             "-C",
             "1.5",
             "-M",
             "2048",
+            "my-layout",
             "-c",
             "/bin/sh",
         ]) {
@@ -692,6 +700,7 @@ mod tests {
                 rm,
                 restart,
                 port,
+                env,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
@@ -703,6 +712,7 @@ mod tests {
                 assert_eq!(rm, true);
                 assert_eq!(restart, RestartPolicy::Always);
                 assert_eq!(port, vec!["1920:1920", "2952:2952"]);
+                assert_eq!(env, vec!["FALL=2", "HAND=4"]);
             }
             _ => panic!("expected Run command"),
         }
@@ -722,6 +732,7 @@ mod tests {
                 rm,
                 restart,
                 port,
+                env,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
@@ -733,6 +744,7 @@ mod tests {
                 assert_eq!(rm, false);
                 assert_eq!(restart, RestartPolicy::Never);
                 assert_eq!(port, Vec::<String>::new());
+                assert_eq!(env, Vec::<String>::new());
             }
             _ => panic!("expected Run command"),
         }

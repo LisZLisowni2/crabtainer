@@ -13,6 +13,7 @@ pub struct ContainerOptions {
     pub restart_policy: RestartPolicy,
     pub rm: bool,
     pub ports: Vec<String>,
+    pub envs: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -23,6 +24,7 @@ pub struct ContainerReady {
     pub memory_limit: Option<i64>,
     pub restart_policy: RestartPolicy,
     pub workdir: String,
+    pub envs: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
@@ -55,6 +57,7 @@ pub struct RuntimeConfig {
     pub is_detached: bool,
     pub rm: bool,
     pub ports: Vec<String>,
+    pub envs: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, ValueEnum, PartialEq, Eq)]
