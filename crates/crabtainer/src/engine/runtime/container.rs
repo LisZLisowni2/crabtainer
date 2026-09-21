@@ -9,7 +9,7 @@ use nix::sched::{CloneFlags, clone};
 use nix::sys::signal::Signal;
 use nix::sys::stat::Mode;
 use nix::unistd::{
-    ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, sethostname, setsid,
+    ForkResult, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execve, fork, sethostname, setsid,
 };
 use oci_spec::runtime::Spec;
 use rand::RngExt;
@@ -160,11 +160,20 @@ pub async fn spawn_detach_container(
                     .and_then(|p| p.cwd().to_str())
                     .unwrap_or("/");
 
+                let envs_from_config = layout_opts
+                    .process()
+                    .as_ref()
+                    .and_then(|p| p.env().to_owned())
+                    .unwrap_or(vec![]);
+
                 let args = resolve_args(&opts.args, default_args.unwrap());
 
                 let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
 
                 let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
+
+                let mut envs = envs_from_config.clone();
+                envs.extend(opts.envs);
 
                 stdout
                     .write_all(
@@ -266,6 +275,7 @@ pub async fn spawn_detach_container(
                     memory_limit: Some(memory_limit),
                     restart_policy: opts.restart_policy.clone(),
                     workdir: cwd.to_string(),
+                    envs: envs.clone(),
                 };
 
                 let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -330,6 +340,7 @@ pub async fn spawn_detach_container(
                     args: args.clone(),
                     rm: opts.rm,
                     ports: opts.ports.clone(),
+                    envs: envs.clone(),
                 };
 
                 fs::write(
@@ -553,11 +564,20 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .and_then(|p| p.cwd().to_str())
         .unwrap_or("/");
 
+    let envs_from_config = layout_opts
+        .process()
+        .as_ref()
+        .and_then(|p| p.env().to_owned())
+        .unwrap_or(vec![]);
+
     let args = resolve_args(&opts.args, default_args.unwrap());
 
     let cpu_limit = resolve_cpu_limit(&opts.cpu_limit, default_cpu);
 
     let memory_limit = resolve_memory_limit(&opts.memory_limit, default_memory);
+
+    let mut envs = envs_from_config.clone();
+    envs.extend(opts.envs);
 
     let assigned_ip = ipam
         .allocate(&container_id)
@@ -666,6 +686,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         memory_limit: Some(memory_limit),
         restart_policy: opts.restart_policy.clone(),
         workdir: cwd.to_string(),
+        envs: envs.clone(),
     };
 
     let cgroup_dir = setup_cgroups(&container_id, &final_opts)?;
@@ -699,11 +720,6 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     } else {
         container_id.to_string()
     };
-    let cwd = layout_opts
-        .process()
-        .as_ref()
-        .and_then(|p| p.cwd().to_str())
-        .expect("[ERROR] Failed to get work dir");
 
     let mut runtime_config = crate::engine::runtime::options::RuntimeConfig {
         container_name,
@@ -720,6 +736,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         memory_limit,
         rm: opts.rm,
         ports: opts.ports.clone(),
+        envs: envs.clone(),
     };
 
     fs::write(
@@ -917,13 +934,32 @@ fn child_process(
             .collect::<Vec<CString>>(),
     );
 
-    match execvp(&cmd_cstring, &args_cstring) {
-        Ok(_) => unreachable!(),
+    let mut envs_cstring: Vec<CString> = vec![];
+    envs_cstring.extend(
+        options
+            .envs
+            .iter()
+            .map(|e| {
+                CString::new(e.as_str()).expect("[CHILD ERROR] Failed to convert env to CString")
+            })
+            .collect::<Vec<CString>>(),
+    );
+
+    match execve(&cmd_cstring, &args_cstring, &envs_cstring) {
+        Ok(_) => 0,
         Err(e) => {
             eprintln!("[CHILD ERROR] Failed to exec container command: {}", e);
             std::process::exit(127);
         }
-    };
+    }
+
+    // match execvp(&cmd_cstring, &args_cstring) {
+    //     Ok(_) => unreachable!(),
+    //     Err(e) => {
+    //         eprintln!("[CHILD ERROR] Failed to exec container command: {}", e);
+    //         std::process::exit(127);
+    //     }
+    // };
 }
 
 #[cfg(test)]
