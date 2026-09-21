@@ -512,6 +512,14 @@ pub async fn spawn_detach_container(
 
 pub async fn run_container(opts: ContainerOptions, container_id: String) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
+    let layout_dir = CrabtainerPaths::layout_store_dir().join(&opts.layout_name);
+    if !layout_dir.exists() {
+        return Err(format!(
+            "Layout '{}' doesn't exist! Build it first using 'crabtainer build'.",
+            opts.layout_name
+        ));
+    }
+
     println!("[HOST] Running a container...");
     let bridge_name = "crabtainer0";
     let subnet_mask = "172.19.0.0/16";
@@ -528,13 +536,6 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         .await
         .map_err(|e| e.to_string())?;
 
-    let layout_dir = CrabtainerPaths::layout_store_dir().join(&opts.layout_name);
-    if !layout_dir.exists() {
-        return Err(format!(
-            "Layout '{}' doesn't exist! Build it first using 'crabtainer build'.",
-            opts.layout_name
-        ));
-    }
     let layout_rootfs = layout_dir.join("rootfs");
 
     let layout_opts: oci_spec::runtime::Spec = Spec::load(layout_dir.join("config.json")).unwrap();
