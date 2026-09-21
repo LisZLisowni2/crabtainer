@@ -662,13 +662,13 @@ mod tests {
     fn parse_run(args: &[&str]) -> Commands {
         let mut full = vec!["crabtainer", "run"];
         full.extend_from_slice(args);
+        println!("{:?}", full);
         Cli::try_parse_from(full).unwrap().command
     }
 
     #[test]
     fn run_parses_all_parameters() {
         match parse_run(&[
-            "my-layout",
             "-n",
             "MyContainer",
             "--rm",
@@ -679,12 +679,13 @@ mod tests {
             "1920:1920",
             "-p",
             "2952:2952",
-            "-e FALL=2",
-            "-e HAND=4",
+            "-eFALL=2",
+            "-eHAND=4",
             "-C",
             "1.5",
             "-M",
             "2048",
+            "my-layout",
             "-c",
             "/bin/sh",
         ]) {
