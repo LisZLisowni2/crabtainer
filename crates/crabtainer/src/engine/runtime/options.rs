@@ -14,6 +14,7 @@ pub struct ContainerOptions {
     pub rm: bool,
     pub ports: Vec<String>,
     pub envs: Vec<String>,
+    pub volumes: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -58,6 +59,7 @@ pub struct RuntimeConfig {
     pub rm: bool,
     pub ports: Vec<String>,
     pub envs: Vec<String>,
+    pub volumes: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, ValueEnum, PartialEq, Eq)]

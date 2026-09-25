@@ -55,6 +55,7 @@ pub async fn start_container(container_id: String) -> Result<(), Box<dyn std::er
         layout_name: config.layout_name,
         ports: config.ports,
         envs: config.envs,
+        volumes: config.volumes,
     };
 
     if config.is_detached {

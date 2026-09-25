@@ -22,11 +22,16 @@ impl CrabtainerPaths {
         Self::base_dir().join("containers")
     }
 
+    pub fn volumes_dir() -> PathBuf {
+        Self::base_dir().join("volumes")
+    }
+
     pub fn init_system_dirs() -> Result<(), String> {
         let dirs = [
             Self::image_store_dir(),
             Self::runtime_dir(),
             Self::layout_store_dir(),
+            Self::volumes_dir(),
         ];
 
         for dir in &dirs {

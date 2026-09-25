@@ -46,6 +46,9 @@ enum Commands {
         #[arg(short, long, action = clap::ArgAction::Append)]
         env: Vec<String>,
 
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        volume: Vec<String>,
+
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
@@ -108,6 +111,18 @@ enum Commands {
         #[command(subcommand)]
         action: SystemActions,
     },
+    Volume {
+        #[command(subcommand)]
+        action: VolumeActions,
+    },
+}
+
+#[derive(Subcommand)]
+enum VolumeActions {
+    Prune,
+    Create,
+    Ls,
+    Remove,
 }
 
 #[derive(Subcommand)]
@@ -162,6 +177,7 @@ async fn main() {
             detach,
             port,
             env,
+            volume,
         } => {
             let mut final_command: Vec<String> = vec![];
 
@@ -183,6 +199,7 @@ async fn main() {
                 restart_policy: restart,
                 ports: port,
                 envs: env,
+                volumes: volume,
             };
 
             let container_id = crabtainer::engine::runtime::container::generate_container_id();
@@ -293,6 +310,12 @@ async fn main() {
                     }
                 }
             }
+        },
+        Commands::Volume { action } => match action {
+            VolumeActions::Prune => {}
+            VolumeActions::Create => {}
+            VolumeActions::Ls => {}
+            VolumeActions::Remove => {}
         },
         Commands::Layout { action } => match action {
             LayoutActions::Rm { tag } => {
@@ -679,8 +702,10 @@ mod tests {
             "1920:1920",
             "-p",
             "2952:2952",
-            "-eFALL=2",
-            "-eHAND=4",
+            "-e FALL=2",
+            "-e HAND=4",
+            "-v koza:/app/",
+            "-v $(pwd)/data:/app/",
             "-C",
             "1.5",
             "-M",
@@ -701,18 +726,20 @@ mod tests {
                 restart,
                 port,
                 env,
+                volume,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
                 assert_eq!(memory_limit, Some(2048.0));
                 assert_eq!(command, Some("/bin/sh".to_string()));
                 assert_eq!(args, None);
-                assert_eq!(detach, true);
+                assert!(detach);
                 assert_eq!(name, Some("MyContainer".to_string()));
-                assert_eq!(rm, true);
+                assert!(rm);
                 assert_eq!(restart, RestartPolicy::Always);
                 assert_eq!(port, vec!["1920:1920", "2952:2952"]);
                 assert_eq!(env, vec!["FALL=2", "HAND=4"]);
+                assert_eq!(volume, vec!["koza:/app/", "$(pwd)/data:/app/"]);
             }
             _ => panic!("expected Run command"),
         }
@@ -733,18 +760,20 @@ mod tests {
                 restart,
                 port,
                 env,
+                volume,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
                 assert_eq!(memory_limit, None);
                 assert_eq!(command, None);
                 assert_eq!(args, None);
-                assert_eq!(detach, false);
+                assert!(!detach);
                 assert_eq!(name, None);
-                assert_eq!(rm, false);
+                assert!(!rm);
                 assert_eq!(restart, RestartPolicy::Never);
                 assert_eq!(port, Vec::<String>::new());
                 assert_eq!(env, Vec::<String>::new());
+                assert_eq!(volume, Vec::<String>::new());
             }
             _ => panic!("expected Run command"),
         }

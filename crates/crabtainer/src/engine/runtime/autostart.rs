@@ -54,6 +54,7 @@ pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
                 rm: config.rm,
                 ports: config.ports,
                 envs: config.envs,
+                volumes: config.volumes,
             };
 
             if let Err(e) = spawn_detach_container(opts, container_id).await {
