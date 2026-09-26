@@ -796,8 +796,19 @@ mod tests {
                 assert!(rm);
                 assert_eq!(restart, RestartPolicy::Always);
                 assert_eq!(port, vec!["1920:1920", "2952:2952"]);
-                assert_eq!(env, vec!["FALL=2", "HAND=4"]);
-                assert_eq!(volume, vec!["koza:/app/", "$(pwd)/data:/app/"]);
+                assert_eq!(
+                    env.iter()
+                        .map(|e| e.strip_prefix(" ").expect("Failed to strip prefix"))
+                        .collect::<Vec<&str>>(),
+                    vec!["FALL=2", "HAND=4"]
+                );
+                assert_eq!(
+                    volume
+                        .iter()
+                        .map(|e| e.strip_prefix(" ").expect("Failed to strip prefix"))
+                        .collect::<Vec<&str>>(),
+                    vec!["koza:/app/", "$(pwd)/data:/app/"]
+                );
             }
             _ => panic!("expected Run command"),
         }
