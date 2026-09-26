@@ -33,9 +33,7 @@ jobs:
           mdbook-version: "latest"
 
       - name: Setup mdbook-mermaid
-        run: |
-          wget https://github.com/badboy/mdbook-mermaid/releases/download/v0.17.1/mdbook-mermaid-v0.17.1-x86_64-unknown-linux-gnu.tar.gz | tar -xz
-          mv mdbook-mermaid /usr/local/bin
+        run: cargo install mdbook-mermaid
 
       - name: Build documentation
         run: mdbook build docs
