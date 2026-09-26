@@ -1,3 +1,7 @@
+//! # Building a layout from Crabtainerfile spec
+//!
+//! Module is responsible for building a layout from Crabtainerfile spec
+
 use crate::engine::build::crabtainerfile::{Crabtainerfile, Instruction, parse_memory_limit};
 use crate::engine::build::instructions::copy::copy_to_layout;
 use crate::engine::build::instructions::download::download_image_if_missing;
@@ -7,6 +11,19 @@ use crate::engine::build::spec::{LayoutOpts, save_config};
 use crate::engine::support::paths::CrabtainerPaths;
 use std::path::Path;
 
+/// Builds a new layout from Crabtainerfile spec
+/// # Arguments
+///
+/// * `crabtainer_file` - Name / Path for crabtainerfile
+/// * `output_layout_name` - Name for layout
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use crabtainer::engine::build::builder;
+///
+/// build_layout("Crabtainerfile".to_string(), "test".to_string());
+/// ```
 pub async fn build_layout(
     crabtainer_file: String,
     output_layout_name: String,

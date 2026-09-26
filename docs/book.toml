@@ -1,0 +1,19 @@
+[book]
+authors = ["LisZLisowni2"]
+language = "en"
+src = "src"
+title = "Crabtainer Documentation"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/LisZLisowni2/crabtainer"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

@@ -13,6 +13,10 @@ use std::collections::HashSet;
 use std::path::Path;
 use walkdir::WalkDir;
 
+/// Crabtainer - A lightweight daemonless container engine built from scratch in Rust
+///
+/// Crabtainer allows running isolated processes using Linux namespaces, cgroups,
+/// and custom overlay filesystems without relying on a background daemon.
 #[derive(Parser)]
 #[command(name = "crabtainer")]
 #[command(
@@ -25,36 +29,52 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create and start a container from a specific layout
     Run {
+        /// The target layout tag to be executed in container
         layout: String,
 
+        /// Run container in background and print container ID
         #[arg(short, long, default_value_t = false)]
         detach: bool,
 
+        /// Automaticallly remove container dir after exit
         #[arg(long, default_value_t = false)]
         rm: bool,
 
+        /// Assign a custom name to the container
         #[arg(short, long)]
         name: Option<String>,
 
+        /// Set maximum CPU limit (e.g. 1.5 for 1.5 CPU Cores)
         #[arg(short = 'C', long)]
         cpu_limit: Option<f64>,
 
+        /// Forward a container port to the host (e.g. -p 8000:80)
         #[arg(short, long, action = clap::ArgAction::Append)]
         port: Vec<String>,
 
+        /// Set environment variables inside the container (e.g. -e KEY=VALUE)
         #[arg(short, long, action = clap::ArgAction::Append)]
         env: Vec<String>,
 
+        /// Bind mount a volume or host path into the container
+        #[arg(short, long, action = clap::ArgAction::Append)]
+        volume: Vec<String>,
+
+        /// Set maximum memoryt limit specified in MB
         #[arg(short = 'M', long)]
         memory_limit: Option<f64>,
 
+        /// Specify restart policy to apply when a container exits
         #[arg(short, long, default_value_t, value_enum)]
         restart: RestartPolicy,
 
+        /// Specify an explicit command to execute inside the container
         #[arg(short, long)]
         command: Option<String>,
 
+        /// Additional arguments passed to command
         #[arg(
             trailing_var_arg = true,
             allow_hyphen_values = true,
@@ -62,83 +82,136 @@ enum Commands {
         )]
         args: Option<Vec<String>>,
     },
+
+    /// Build a new container image layout using a spec file (Crabtainerfile)
     Build {
+        /// Path to the build instructions file
         #[arg(short, long, default_value = "Crabtainerfile")]
         file: String,
 
+        /// Tag to assign to the built image layout
         #[arg(short, long)]
         tag: String,
     },
+
+    /// List active and managed containers
     Ps,
-    Start {
-        name: String,
-    },
-    Restart {
-        name: String,
-    },
-    Stop {
-        name: String,
-    },
-    Rm {
-        name: String,
-    },
+
+    /// Start stopped container
+    Start { name: String },
+
+    /// Restart active or error container
+    Restart { name: String },
+    /// Stop active container
+    Stop { name: String },
+    /// Remove stopped container
+    Rm { name: String },
+    /// Execute a command inside the container
     Exec {
+        /// Enter the interactive mode inside the container
         #[arg(short, long, default_value_t = false)]
         interactive: bool,
 
+        /// Enter the terminal inside the container
         #[arg(short, long, default_value_t = false)]
         tty: bool,
 
+        /// Target container (specific name)
         name: String,
 
+        /// Command to be executed inside container
         cmd: String,
 
+        /// Optional commands arguments passed to command
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, requires = "cmd")]
         args: Option<Vec<String>>,
     },
+
+    /// Manage downloaded images or pull one
     Image {
         #[command(subcommand)]
         action: ImageActions,
     },
+
+    /// Manage available layouts
     Layout {
         #[command(subcommand)]
         action: LayoutActions,
     },
+
+    /// Manage system-related crabtainer's things
     System {
         #[command(subcommand)]
         action: SystemActions,
     },
+
+    /// Manage persistent data storage volumes
+    Volume {
+        #[command(subcommand)]
+        action: VolumeActions,
+    },
+}
+
+#[derive(Subcommand)]
+enum VolumeActions {
+    /// Remove all unused local volumes
+    Prune,
+    /// Create a new named volume
+    Create,
+    /// List all volumes
+    Ls,
+    /// Remove a specific volume
+    Remove,
 }
 
 #[derive(Subcommand)]
 enum SystemActions {
     Prune,
+    /// Initialize mandatory crabtainer's configuration across system  
     Init,
+    /// Enable autostart via systemd (in future other init systems)
     Autostart,
 }
 
 #[derive(Subcommand)]
 enum ImageActions {
+    /// List all images
     Ps,
-    Rm {
-        name: String,
-    },
+
+    /// Remove a specific image
+    Rm { name: String },
+
+    /// Download a image from public registry
     Pull {
+        /// Image ref to be downloaded
         image: String,
+        /// Alias of downloaded image
         alias: String,
+        /// Delete existing image
         #[arg(short, long, default_value_t = false)]
         overriding: bool,
     },
-    Inspect {
-        name: String,
-    },
+
+    /// Display details about image
+    Inspect { name: String },
 }
 
 #[derive(Subcommand)]
 enum LayoutActions {
+    /// List all layouts
     Ps,
-    Rm { tag: String },
-    Inspect { tag: String },
+
+    /// Remove specific layout
+    Rm {
+        /// Specific tag name of layout
+        tag: String,
+    },
+
+    /// Display details about layout
+    Inspect {
+        /// Specific tag name of layout
+        tag: String,
+    },
 }
 
 #[tokio::main]
@@ -162,6 +235,7 @@ async fn main() {
             detach,
             port,
             env,
+            volume,
         } => {
             let mut final_command: Vec<String> = vec![];
 
@@ -183,6 +257,7 @@ async fn main() {
                 restart_policy: restart,
                 ports: port,
                 envs: env,
+                volumes: volume,
             };
 
             let container_id = crabtainer::engine::runtime::container::generate_container_id();
@@ -293,6 +368,12 @@ async fn main() {
                     }
                 }
             }
+        },
+        Commands::Volume { action } => match action {
+            VolumeActions::Prune => {}
+            VolumeActions::Create => {}
+            VolumeActions::Ls => {}
+            VolumeActions::Remove => {}
         },
         Commands::Layout { action } => match action {
             LayoutActions::Rm { tag } => {
@@ -679,8 +760,10 @@ mod tests {
             "1920:1920",
             "-p",
             "2952:2952",
-            "-eFALL=2",
-            "-eHAND=4",
+            "-e FALL=2",
+            "-e HAND=4",
+            "-v koza:/app/",
+            "-v $(pwd)/data:/app/",
             "-C",
             "1.5",
             "-M",
@@ -701,18 +784,20 @@ mod tests {
                 restart,
                 port,
                 env,
+                volume,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, Some(1.5));
                 assert_eq!(memory_limit, Some(2048.0));
                 assert_eq!(command, Some("/bin/sh".to_string()));
                 assert_eq!(args, None);
-                assert_eq!(detach, true);
+                assert!(detach);
                 assert_eq!(name, Some("MyContainer".to_string()));
-                assert_eq!(rm, true);
+                assert!(rm);
                 assert_eq!(restart, RestartPolicy::Always);
                 assert_eq!(port, vec!["1920:1920", "2952:2952"]);
                 assert_eq!(env, vec!["FALL=2", "HAND=4"]);
+                assert_eq!(volume, vec!["koza:/app/", "$(pwd)/data:/app/"]);
             }
             _ => panic!("expected Run command"),
         }
@@ -733,18 +818,20 @@ mod tests {
                 restart,
                 port,
                 env,
+                volume,
             } => {
                 assert_eq!(layout, "my-layout");
                 assert_eq!(cpu_limit, None);
                 assert_eq!(memory_limit, None);
                 assert_eq!(command, None);
                 assert_eq!(args, None);
-                assert_eq!(detach, false);
+                assert!(!detach);
                 assert_eq!(name, None);
-                assert_eq!(rm, false);
+                assert!(!rm);
                 assert_eq!(restart, RestartPolicy::Never);
                 assert_eq!(port, Vec::<String>::new());
                 assert_eq!(env, Vec::<String>::new());
+                assert_eq!(volume, Vec::<String>::new());
             }
             _ => panic!("expected Run command"),
         }

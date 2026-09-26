@@ -1,32 +1,73 @@
+//! # Crabtainerfile Parser Module
+//!
+//! This module provides parsing logic for `Crabtainerfile` specifications.
+//! It handles tokenizing instructions, validating arguments, and parsing
+//! memory limit units (e.g., `512m`, `2g`).
+
 use std::fs;
 use std::path::Path;
 
+/// Supported build instructions within a `Crabtainerfile`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
+    /// Download a remote image layer and assign an alias.
     Download {
+        /// Remote reference or URL of the image.
         image_ref: String,
+        /// Local alias to store the downloaded image as.
         alias: String,
+        /// Force overwrite if the local image alias already exists.
         is_override: bool,
     },
+    /// Base image to use for the build step.
     From(String),
+    /// Copy files from host path to container path.
     Copy {
+        /// Host source path.
         src: String,
+        /// Container destination path.
         dst: String,
     },
+    /// Execute a shell command during the image build process.
     Run(String),
+    /// Default execution command and arguments for the container.
     Cmd {
+        /// Command name and positional arguments.
         args: Vec<String>,
     },
+    /// Maximum CPU limit in cores (e.g. 1.5).
     CpuLimit(f64),
+    /// Raw memory limit string specification (e.g. "512m", "2g").
     MemoryLimit(String),
+    /// Working directory for subsequent RUN/CMD instructions.
     Workdir(String),
 }
 
+/// Represents a parsed 'Crabtainerfile' containing an ordered sequence of instructions.
 #[derive(Debug, Default)]
 pub struct Crabtainerfile {
+    /// Ordered list of parsed build instructions
     pub instructions: Vec<Instruction>,
 }
 
+/// Parses a human-readable memory limit string into bytes.
+///
+/// Supports suffixes:
+/// - `g` / `G` for Gigabytes
+/// - `m` / `M` for Megabytes
+/// - `k` / `K` for Kilobytes
+/// - `b` / `B` (or raw numbers) for Bytes
+///
+/// # Errors
+///
+/// Returns an error string if the numeric value cannot be parsed as a floating-point number.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let bytes = parse_memory_limit("512m")?;
+/// assert_eq!(bytes, 536_870_912.0);
+/// ```
 pub fn parse_memory_limit(s: &str) -> Result<f64, String> {
     let lower = s.trim().to_lowercase();
 
@@ -55,6 +96,11 @@ pub fn parse_memory_limit(s: &str) -> Result<f64, String> {
 }
 
 impl Crabtainerfile {
+    /// Reads and parses a `Crabtainerfile` directly from a disk path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if reading the file fails or if the syntax is invalid.
     pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content =
             fs::read_to_string(path).map_err(|e| format!("Error reading file: {:?}", e))?;
@@ -62,6 +108,14 @@ impl Crabtainerfile {
         Self::parse(&content)
     }
 
+    /// Parses a raw `Crabtainerfile` string specification line-by-line.
+    ///
+    /// Ignores empty lines and comment lines starting with `#`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a line-numbered error description if any line contains invalid syntax
+    /// or missing required parameters.
     pub fn parse(content: &str) -> Result<Self, String> {
         let mut instructions = Vec::new();
 

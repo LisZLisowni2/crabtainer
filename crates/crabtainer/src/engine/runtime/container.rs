@@ -264,6 +264,41 @@ pub async fn spawn_detach_container(
                 )
                 .expect("[ERROR] Failed to mount init program");
 
+                for vol in opts.volumes.iter() {
+                    let splited: Vec<&str> = vol.split(':').collect();
+                    let container_path = merged_rootfs.join(splited[1]);
+                    // let first_part_pathbuf = PathBuf::from(splited[0]);
+                    let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
+
+                    if fs::metadata(&volume_path).is_err() {
+                        fs::create_dir_all(&volume_path);
+                    }
+
+                    if fs::metadata(&container_path).is_err() {
+                        fs::create_dir_all(&container_path);
+                    }
+
+                    mount(
+                        Some(
+                            volume_path
+                                .to_str()
+                                .expect("Failed to convert PathBuf to &str"),
+                        ),
+                        &container_path,
+                        None::<&str>,
+                        MsFlags::MS_BIND,
+                        None::<&str>,
+                    );
+                }
+                mount(
+                    Some(container_init_localization.to_str().unwrap()),
+                    &container_init_path,
+                    None::<&str>,
+                    MsFlags::MS_BIND | MsFlags::MS_RDONLY,
+                    None::<&str>,
+                )
+                .expect("[ERROR] Failed to mount init program");
+
                 stdout
                     .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
                     .unwrap();
@@ -341,6 +376,7 @@ pub async fn spawn_detach_container(
                     rm: opts.rm,
                     ports: opts.ports.clone(),
                     envs: envs.clone(),
+                    volumes: opts.volumes.clone(),
                 };
 
                 fs::write(
@@ -678,6 +714,33 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     )
     .expect("[ERROR] Failed to mount init program");
 
+    for vol in opts.volumes.iter() {
+        let splited: Vec<&str> = vol.split(':').collect();
+        let container_path = merged_rootfs.join(splited[1]);
+        // let first_part_pathbuf = PathBuf::from(splited[0]);
+        let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
+
+        if fs::metadata(&volume_path).is_err() {
+            fs::create_dir_all(&volume_path);
+        }
+
+        if fs::metadata(&container_path).is_err() {
+            fs::create_dir_all(&container_path);
+        }
+
+        mount(
+            Some(
+                volume_path
+                    .to_str()
+                    .expect("Failed to convert PathBuf to &str"),
+            ),
+            &container_path,
+            None::<&str>,
+            MsFlags::MS_BIND,
+            None::<&str>,
+        );
+    }
+
     println!("[HOST] Starting container {}", container_id);
 
     let final_opts = crate::engine::runtime::options::ContainerReady {
@@ -738,6 +801,7 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         rm: opts.rm,
         ports: opts.ports.clone(),
         envs: envs.clone(),
+        volumes: opts.volumes.clone(),
     };
 
     fs::write(

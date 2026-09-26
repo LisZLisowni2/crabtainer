@@ -1,2 +1,6 @@
 /target
 .idea
+
+# mdbook build output
+docs/book/
+book/
