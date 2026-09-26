@@ -1,3 +1,5 @@
+//! # Spec file creation
+
 use oci_spec::runtime::{
     LinuxBuilder, LinuxCpuBuilder, LinuxMemoryBuilder, LinuxNamespaceBuilder, LinuxNamespaceType,
     LinuxResourcesBuilder, ProcessBuilder, RootBuilder, SpecBuilder,
@@ -5,14 +7,25 @@ use oci_spec::runtime::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Custom defined layout options
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LayoutOpts {
+    /// Memory limit (e.g. 1024M)
     pub memory_limit: Option<f64>,
+    /// Cpu limit (e.g. 1.5)
     pub cpu_limit: Option<f64>,
+    /// Command and arguments to be executed on start of container
     pub args: Vec<String>,
+    /// Working directory in container
     pub workdir: Option<String>,
 }
 
+/// Saves a config to OCI compatible spec
+///
+/// # Arguments
+///
+/// * `opts` - Options specified in LayoutOpts
+/// * `layout_path` - Path of newly created layout
 pub async fn save_config(
     opts: LayoutOpts,
     layout_path: PathBuf,
