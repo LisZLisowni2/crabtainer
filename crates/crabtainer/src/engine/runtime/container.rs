@@ -28,7 +28,7 @@ pub fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-pub fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
+fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
     } else {
@@ -36,7 +36,7 @@ pub fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     }
 }
 
-pub fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
+fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
     if let Some(cpu) = cpu_limit {
         (*cpu as i64) * 100000i64
     } else {
@@ -44,7 +44,24 @@ pub fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>)
     }
 }
 
-pub fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    fs::create_dir_all(&dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
     if let Some(memory) = memory_limit {
         *memory as i64
     } else {
@@ -266,16 +283,25 @@ pub async fn spawn_detach_container(
 
                 for vol in opts.volumes.iter() {
                     let splited: Vec<&str> = vol.split(':').collect();
-                    let container_path = merged_rootfs.join(splited[1]);
+                    let striped = splited[1]
+                        .strip_prefix("/")
+                        .expect("Failed to strip volume location");
+                    let container_path = merged_rootfs.join(striped);
                     // let first_part_pathbuf = PathBuf::from(splited[0]);
                     let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
 
                     if fs::metadata(&volume_path).is_err() {
-                        fs::create_dir_all(&volume_path);
+                        fs::create_dir_all(&volume_path).expect("Failed to create volume site dir");
+
+                        if fs::metadata(&container_path).is_ok() {
+                            copy_dir_all(&container_path, &volume_path)
+                                .expect("Failed to copy container dir to volume");
+                        }
                     }
 
                     if fs::metadata(&container_path).is_err() {
-                        fs::create_dir_all(&container_path);
+                        fs::create_dir_all(&container_path)
+                            .expect("Failed to create container site dir");
                     }
 
                     mount(
@@ -288,16 +314,9 @@ pub async fn spawn_detach_container(
                         None::<&str>,
                         MsFlags::MS_BIND,
                         None::<&str>,
-                    );
+                    )
+                    .expect("Failed to mount volume");
                 }
-                mount(
-                    Some(container_init_localization.to_str().unwrap()),
-                    &container_init_path,
-                    None::<&str>,
-                    MsFlags::MS_BIND | MsFlags::MS_RDONLY,
-                    None::<&str>,
-                )
-                .expect("[ERROR] Failed to mount init program");
 
                 stdout
                     .write_all(format!("[HOST] Starting container {}\n", container_id).as_bytes())
@@ -716,16 +735,24 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     for vol in opts.volumes.iter() {
         let splited: Vec<&str> = vol.split(':').collect();
-        let container_path = merged_rootfs.join(splited[1]);
+        let striped = splited[1]
+            .strip_prefix("/")
+            .expect("Failed to strip volume location");
+        let container_path = merged_rootfs.join(striped);
         // let first_part_pathbuf = PathBuf::from(splited[0]);
         let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
 
         if fs::metadata(&volume_path).is_err() {
-            fs::create_dir_all(&volume_path);
+            fs::create_dir_all(&volume_path).expect("Failed to create volume site dir");
+
+            if fs::metadata(&container_path).is_ok() {
+                copy_dir_all(&container_path, &volume_path)
+                    .expect("Failed to copy container dir to volume");
+            }
         }
 
         if fs::metadata(&container_path).is_err() {
-            fs::create_dir_all(&container_path);
+            fs::create_dir_all(&container_path).expect("Failed to create container site dir");
         }
 
         mount(
@@ -738,7 +765,8 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
             None::<&str>,
             MsFlags::MS_BIND,
             None::<&str>,
-        );
+        )
+        .expect("Failed to mount volume");
     }
 
     println!("[HOST] Starting container {}", container_id);
