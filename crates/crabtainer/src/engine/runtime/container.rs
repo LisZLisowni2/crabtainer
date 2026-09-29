@@ -53,7 +53,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
 
         if ty.is_dir() {
             copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
-        } else {
+        } else if ty.is_file() {
             fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
         }
     }
@@ -283,16 +283,24 @@ pub async fn spawn_detach_container(
 
                 for vol in opts.volumes.iter() {
                     let splited: Vec<&str> = vol.split(':').collect();
+
+                    let is_bind_mount = splited[0].contains("/") || splited[0].contains("~");
+
                     let striped = splited[1]
                         .strip_prefix("/")
                         .expect("Failed to strip volume location");
                     let container_path = merged_rootfs.join(striped);
                     // let first_part_pathbuf = PathBuf::from(splited[0]);
-                    let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
+                    let volume_path = if is_bind_mount {
+                        PathBuf::from(splited[0])
+                            .canonicalize()
+                            .expect("Failed to canonicalize bind mount dir")
+                    } else {
+                        CrabtainerPaths::volumes_dir().join(splited[0])
+                    };
 
-                    if fs::metadata(&volume_path).is_err() {
+                    if !is_bind_mount && fs::metadata(&volume_path).is_err() {
                         fs::create_dir_all(&volume_path).expect("Failed to create volume site dir");
-
                         if fs::metadata(&container_path).is_ok() {
                             copy_dir_all(&container_path, &volume_path)
                                 .expect("Failed to copy container dir to volume");
@@ -735,16 +743,24 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
 
     for vol in opts.volumes.iter() {
         let splited: Vec<&str> = vol.split(':').collect();
+
+        let is_bind_mount = splited[0].contains("/") || splited[0].contains("~");
+
         let striped = splited[1]
             .strip_prefix("/")
             .expect("Failed to strip volume location");
         let container_path = merged_rootfs.join(striped);
         // let first_part_pathbuf = PathBuf::from(splited[0]);
-        let volume_path = CrabtainerPaths::volumes_dir().join(splited[0]);
+        let volume_path = if is_bind_mount {
+            PathBuf::from(splited[0])
+                .canonicalize()
+                .expect("Failed to canonicalize bind mount dir")
+        } else {
+            CrabtainerPaths::volumes_dir().join(splited[0])
+        };
 
-        if fs::metadata(&volume_path).is_err() {
+        if !is_bind_mount && fs::metadata(&volume_path).is_err() {
             fs::create_dir_all(&volume_path).expect("Failed to create volume site dir");
-
             if fs::metadata(&container_path).is_ok() {
                 copy_dir_all(&container_path, &volume_path)
                     .expect("Failed to copy container dir to volume");
