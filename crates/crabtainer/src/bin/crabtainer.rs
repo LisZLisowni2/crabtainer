@@ -157,11 +157,11 @@ enum VolumeActions {
     /// Remove all unused local volumes
     Prune,
     /// Create a new named volume
-    Create,
+    Create { name: String },
     /// List all volumes
     Ls,
     /// Remove a specific volume
-    Remove,
+    Remove { name: String },
 }
 
 #[derive(Subcommand)]
@@ -371,9 +371,54 @@ async fn main() {
         },
         Commands::Volume { action } => match action {
             VolumeActions::Prune => {}
-            VolumeActions::Create => {}
-            VolumeActions::Ls => {}
-            VolumeActions::Remove => {}
+            VolumeActions::Create { name } => {
+                let path = CrabtainerPaths::volumes_dir().join(&name);
+
+                if std::fs::metadata(&path).is_err() {
+                    std::fs::create_dir_all(path).expect("Failed to create new volume dir");
+                } else {
+                    eprintln!("Volume {} already exists", name);
+                }
+            }
+            VolumeActions::Ls => {
+                let store = CrabtainerPaths::volumes_dir();
+
+                println!("{:<20} {:<15}", "VOLUME NAME", "SIZE");
+                println!("{}", "-".repeat(38));
+
+                if let Ok(dir) = std::fs::read_dir(store) {
+                    for entry in dir.flatten() {
+                        let path = entry.path();
+                        let name = path
+                            .file_stem()
+                            .expect("Failed to retrieve file stem from path");
+
+                        let size = if path.is_dir() {
+                            WalkDir::new(&path)
+                                .into_iter()
+                                .filter_map(|e| e.ok())
+                                .filter_map(|e| e.metadata().ok())
+                                .filter(|m| m.is_dir())
+                                .map(|m| m.len())
+                                .sum()
+                        } else {
+                            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+                        };
+
+                        println!("{} {}", name.display(), size);
+                    }
+                }
+            }
+            VolumeActions::Remove { name } => {
+                let path = CrabtainerPaths::volumes_dir().join(&name);
+
+                if std::fs::metadata(&path).is_ok() {
+                    std::fs::remove_dir_all(path).expect("Failed to remove volume dir");
+                    println!("{}", name);
+                } else {
+                    eprintln!("Volume {} doesn't exists", name);
+                }
+            }
         },
         Commands::Layout { action } => match action {
             LayoutActions::Rm { tag } => {
@@ -689,15 +734,17 @@ async fn search_id_by_name(name: String) -> Option<String> {
     for entry in entries.flatten() {
         let path = entry.path();
 
-        let config_content = std::fs::read_to_string(path.join("config.json"))
-            .expect("[ERROR] Failed to read config");
-        let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
-            Ok(cfg) => cfg,
-            Err(_) => continue,
-        };
+        if let Ok(config_content) = std::fs::read_to_string(path.join("config.json")) {
+            let config: RuntimeConfig = match serde_json::from_str(config_content.as_str()) {
+                Ok(cfg) => cfg,
+                Err(_) => continue,
+            };
 
-        if config.container_name == name {
-            return Some(path.file_name().unwrap().to_str().unwrap().to_string());
+            if config.container_name == name {
+                return Some(path.file_name().unwrap().to_str().unwrap().to_string());
+            }
+        } else {
+            continue;
         }
     }
 

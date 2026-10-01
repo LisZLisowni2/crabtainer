@@ -2,18 +2,23 @@
 
 Crabtainer follows a **daemonless model** inspired by Podman.
 
-+-------------------------------------------------------+
-|                    crabtainer CLI                     |
-|  (Parses flags, builds images, configures cgroups)    |
-+---------------------------+---------------------------+
-|
-spawns | (clone)
-v
-+-------------------------------------------------------+
-|                   crabtainer_init                     |
-|  (Executes inside new namespaces as PID 1, mounts     |
-|   OverlayFS, drops privileges, execs workload)        |
-+-------------------------------------------------------+
+## Running a container
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant CLI as crabtainer CLI
+    participant Init as crabtainer_init (PID 1)
+    participant Kernel as Linux Kernel (Cgroups/NS)
+
+    User->>CLI: crabtainer run --name app my-image
+    CLI->>Kernel: Create Namespaces & Cgroups v2
+    CLI->>Init: Spawn crabtainer_init in target NS
+    Init->>Kernel: Mount OverlayFS rootfs
+    Init->>Init: Exec container command
+    Init-->>CLI: Process exit code / status
+```
 
 ## Key Architectural Concepts
 
