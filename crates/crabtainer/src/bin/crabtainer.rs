@@ -10,7 +10,7 @@ use crabtainer::engine::support::paths::CrabtainerPaths;
 use getch_rs::Key;
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use walkdir::WalkDir;
 
 /// Crabtainer - A lightweight daemonless container engine built from scratch in Rust
@@ -126,6 +126,12 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, requires = "cmd")]
         args: Option<Vec<String>>,
     },
+
+    /// Displays details about container (config.json)
+    Inspect { name: String },
+
+    /// Displays logs of the certain container
+    Logs { name: String },
 
     /// Manage downloaded images or pull one
     Image {
@@ -740,6 +746,39 @@ async fn main() {
                     .unwrap();
             }
         },
+        Commands::Inspect { name } => {
+            if let Some(id) = search_id_by_name(name.clone()).await {
+                let path = CrabtainerPaths::runtime_dir().join(id);
+
+                if let Ok(cfg_str) = std::fs::read_to_string(path) {
+                    match serde_json::from_str::<RuntimeConfig>(&cfg_str) {
+                        Ok(cfg) => {
+                            println!("{:?}", cfg);
+                        }
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to read config: {}", e);
+                        }
+                    }
+                }
+            } else {
+                eprintln!("[ERROR] Container '{}' not found", name)
+            }
+        }
+        Commands::Logs { name } => {
+            if let Some(id) = search_id_by_name(name.clone()).await {
+                let path = CrabtainerPaths::runtime_dir().join(id);
+
+                let command = std::process::Command::new("less")
+                    .arg(path.join("container.log"))
+                    .status();
+
+                if let Err(e) = command {
+                    eprintln!("[ERROR] Failed to execute command less: {}", e);
+                }
+            } else {
+                eprintln!("[ERROR] Container '{}' not found", name);
+            }
+        }
     }
 }
 
