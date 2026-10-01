@@ -35,15 +35,15 @@ CMD /app/app.sh
 ### Step 3: Build the Layout
 
 ```bash
-crabtainer build --tag my-app:v1
+crabtainer build --tag myapp-v1
 ```
 
 ### Step 4: Run the Container
 
 ```bash
 # Run interactively
-crabtainer run my-app:v1
+crabtainer run myapp-v1
 
 # Run in background with resource limits
-crabtainer run -d --name production-app -C 2.0 -M 1024m my-app:v1
+crabtainer run -d --name production-app -C 2.0 -M 1024m myapp-v1
 ```
