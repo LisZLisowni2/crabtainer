@@ -1,0 +1,3 @@
+BUILD LAYOUT: crabtainer build [PATH_TO_EXAMPLE] -t postgres-1.0.0
+
+RUN CONTAINER: crabtainer run -d -p 5432:5432 -v pg-data:/var/lib/postgresql -e POSTGRES_PASSWORD=secretpassowrd postgres-1.0.0
