@@ -1,7 +1,6 @@
 //! # Building a layout from Crabtainerfile spec
 //!
 //! Module is responsible for building a layout from Crabtainerfile spec
-
 use crate::engine::build::crabtainerfile::{Crabtainerfile, Instruction, parse_memory_limit};
 use crate::engine::build::instructions::copy::copy_to_layout;
 use crate::engine::build::instructions::download::download_image_if_missing;
@@ -58,11 +57,13 @@ pub async fn build_layout(
 
     let mut count = 0;
     let steps = crabtainer.instructions.len();
+
     let mut opts = LayoutOpts {
         memory_limit: None,
         cpu_limit: None,
         args: vec![],
         workdir: None,
+        envs: vec![],
     };
 
     for instruction in crabtainer.instructions {
@@ -89,6 +90,38 @@ pub async fn build_layout(
             Instruction::From(base_image) => {
                 println!(" => [{}/{}] FROM {}", count, steps, base_image);
                 from_image(&base_image, &output_layout_name).await?;
+                let img_spec_path = CrabtainerPaths::image_store_dir()
+                    .join(base_image)
+                    .join("config.json");
+                if let Ok(read_spec) = tokio::fs::read_to_string(img_spec_path).await
+                    && let Ok(img_cfg) =
+                        serde_json::from_str::<oci_spec::image::ImageConfiguration>(&read_spec)
+                {
+                    if let Some(cfg) = img_cfg.config() {
+                        if opts.args.is_empty() {
+                            if let Some(entrypoint) = cfg.entrypoint() {
+                                opts.args.extend_from_slice(entrypoint);
+                            }
+                            if let Some(cmd) = cfg.cmd() {
+                                opts.args.extend_from_slice(cmd);
+                            }
+                        }
+
+                        if opts.envs.is_empty()
+                            && let Some(envs) = cfg.env()
+                        {
+                            opts.envs.extend_from_slice(envs);
+                        }
+
+                        if opts.workdir.is_none()
+                            && let Some(working_dir) = cfg.working_dir()
+                        {
+                            opts.workdir = Some(working_dir.into());
+                        }
+                    }
+                } else {
+                    eprintln!("Failed to retrieve image spec");
+                }
             }
             Instruction::Copy { src, dst } => {
                 println!(" => [{}/{}] COPY {} to {}", count, steps, src, dst);

@@ -24,7 +24,7 @@ pub fn exec_with_tty(
     let OpenptyResult { master, slave } = nix::pty::openpty(None, None)?;
 
     match unsafe { fork()? } {
-        ForkResult::Parent { child } => {
+        ForkResult::Parent { child: _ } => {
             drop(slave);
 
             enable_raw_mode()?;

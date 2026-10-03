@@ -18,6 +18,8 @@ pub struct LayoutOpts {
     pub args: Vec<String>,
     /// Working directory in container
     pub workdir: Option<String>,
+    /// Default environment variables
+    pub envs: Vec<String>,
 }
 
 /// Saves a config to OCI compatible spec
@@ -56,6 +58,7 @@ pub async fn save_config(
                 .terminal(true)
                 .cwd(cwd)
                 .args(opts.args)
+                .env(opts.envs)
                 .build()?,
         )
         .linux(
@@ -116,6 +119,7 @@ mod tests {
                 "echo hi".to_string(),
             ],
             workdir: Some("/app".to_string()),
+            envs: vec!["VERSION=1.12".to_string()],
         }
     }
 
@@ -136,6 +140,7 @@ mod tests {
             ]
         );
         assert_eq!(decoded.workdir, Some("/app".to_string()));
+        assert_eq!(decoded.envs, vec!["VERSION=1.12"])
     }
 
     #[tokio::test]
@@ -171,6 +176,7 @@ mod tests {
             cpu_limit: None,
             args: vec![],
             workdir: None,
+            envs: vec![],
         };
         save_config(opts, dir.path().to_path_buf()).await.unwrap();
 

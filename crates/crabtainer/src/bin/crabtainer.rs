@@ -127,6 +127,12 @@ enum Commands {
         args: Option<Vec<String>>,
     },
 
+    /// Displays details about container (config.json)
+    Inspect { name: String },
+
+    /// Displays logs of the certain container
+    Logs { name: String },
+
     /// Manage downloaded images or pull one
     Image {
         #[command(subcommand)]
@@ -237,6 +243,30 @@ async fn main() {
             env,
             volume,
         } => {
+            let main_path = CrabtainerPaths::runtime_dir();
+
+            if let Some(ref n) = name {
+                for entry in main_path
+                    .read_dir()
+                    .expect("[CRITICAL] Failed to read runtime dir")
+                {
+                    let entry = entry.expect("[CRITICAL] Failed to unwrap entry");
+                    let path = entry.path();
+
+                    if let Ok(cfg_str) = std::fs::read_to_string(path.join("config.json")) {
+                        match serde_json::from_str::<RuntimeConfig>(&cfg_str) {
+                            Ok(cfg) => {
+                                if cfg.container_name == *n {
+                                    eprintln!("[ERROR] Container with name '{}' already exists", n);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(_) => continue,
+                        }
+                    }
+                }
+            }
+
             let mut final_command: Vec<String> = vec![];
 
             if let Some(cmd) = command {
@@ -270,11 +300,17 @@ async fn main() {
             }
         }
         Commands::Build { file, tag } => {
-            let canonicalized = std::fs::canonicalize(file)
-                .expect("Failed to canonicalize crabtainerfile path")
-                .into_string()
-                .expect("Failed to convert to String");
-            build_layout(canonicalized, tag).await.unwrap();
+            let path = CrabtainerPaths::image_store_dir().join(&tag);
+
+            if std::fs::metadata(path).is_ok() {
+                eprintln!("[ERROR] Layout with tag '{}' already exists", tag);
+            } else {
+                let canonicalized = std::fs::canonicalize(file)
+                    .expect("Failed to canonicalize crabtainerfile path")
+                    .into_string()
+                    .expect("Failed to convert to String");
+                build_layout(canonicalized, tag).await.unwrap();
+            }
         }
         Commands::Image { action } => match action {
             ImageActions::Inspect { name } => {
@@ -329,13 +365,18 @@ async fn main() {
                 alias,
                 overriding,
             } => {
-                crabtainer::engine::build::instructions::download::download_image_if_missing(
-                    image.as_str(),
-                    alias.as_str(),
-                    overriding,
-                )
-                .await
-                .unwrap();
+                let path = CrabtainerPaths::runtime_dir().join(&alias);
+                if std::fs::metadata(path).is_ok() && !overriding {
+                    eprintln!("[ERROR] Image with alias '{}' already exists", alias);
+                } else {
+                    crabtainer::engine::build::instructions::download::download_image_if_missing(
+                        image.as_str(),
+                        alias.as_str(),
+                        overriding,
+                    )
+                    .await
+                    .unwrap();
+                }
             }
             ImageActions::Ps => {
                 let store = CrabtainerPaths::image_store_dir();
@@ -705,6 +746,39 @@ async fn main() {
                     .unwrap();
             }
         },
+        Commands::Inspect { name } => {
+            if let Some(id) = search_id_by_name(name.clone()).await {
+                let path = CrabtainerPaths::runtime_dir().join(id);
+
+                if let Ok(cfg_str) = std::fs::read_to_string(path) {
+                    match serde_json::from_str::<RuntimeConfig>(&cfg_str) {
+                        Ok(cfg) => {
+                            println!("{:?}", cfg);
+                        }
+                        Err(e) => {
+                            eprintln!("[ERROR] Failed to read config: {}", e);
+                        }
+                    }
+                }
+            } else {
+                eprintln!("[ERROR] Container '{}' not found", name)
+            }
+        }
+        Commands::Logs { name } => {
+            if let Some(id) = search_id_by_name(name.clone()).await {
+                let path = CrabtainerPaths::runtime_dir().join(id);
+
+                let command = std::process::Command::new("less")
+                    .arg(path.join("container.log"))
+                    .status();
+
+                if let Err(e) = command {
+                    eprintln!("[ERROR] Failed to execute command less: {}", e);
+                }
+            } else {
+                eprintln!("[ERROR] Container '{}' not found", name);
+            }
+        }
     }
 }
 
