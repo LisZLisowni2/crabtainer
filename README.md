@@ -23,6 +23,9 @@ Objectives are to achive lightweight and fast image builder and runtime.
 - linux namespaces & overlayfs support
 - systemd (optional, only for autostart script)
 
+> [!WARNING]
+> Alpine-based systems aren't currently supported
+
 ### Building
 
 ```bash
@@ -54,6 +57,7 @@ You're welcome if you want to contribute. Look at [CONTRIBUTING.md](CONTRIBUTING
 Look also on [security](SECURITY.md), [code of conduct](CODE_OF_CONDUCT.md) and [contributing](CONTRIBUTING.md) files for further information.
 
 ## Troubleshooting
+
 - Port forwarding:
 
 If it doesn't work, it means a function doesn't trigger up. Type and run manually that command:
@@ -61,4 +65,3 @@ If it doesn't work, it means a function doesn't trigger up. Type and run manuall
 ```bash
 sysctl net.ipv4.config.all.route_localnet=1
 ```
-
