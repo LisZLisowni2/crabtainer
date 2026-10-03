@@ -14,7 +14,7 @@ DOWNLOAD <URL> AS <ALIAS> [OVERRIDE]
 
 ### FROM
 
-Specifies the base image or downloaded rootfs alias to build upon.
+Specifies the base image downloaded using `DOWNLOAD` and load config from that (currently only `cmd`, `entrypoint` and `workdir`)
 
 ```Dockerfile
 FROM <ALIAS_OR_IMAGE>
