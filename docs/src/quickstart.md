@@ -12,7 +12,7 @@ This guide will walk you through building your first layout and running a contai
 
 ### Step 1: Initialize System Directories
 
-Before running any containers, set up Crabtainer's runtime paths and network bridges:
+Before running any containers, set up Crabtainer's network settings and autostart (systemd only):
 
 ```bash
 sudo crabtainer system init
@@ -23,8 +23,8 @@ sudo crabtainer system init
 Create a file named Crabtainerfile in your working directory:
 
 ```Dockerfile
-DOWNLOAD alpine:latest AS alpine
-FROM alpine
+DOWNLOAD debian:trixie AS debian
+FROM debian
 WORKDIR /app
 COPY ./app.sh ~
 CPU_LIMIT 1.0
