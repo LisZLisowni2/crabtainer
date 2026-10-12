@@ -17,7 +17,7 @@ DOWNLOAD <URL> AS <ALIAS> [OVERRIDE]
 Specifies the base image downloaded using `DOWNLOAD` and load config from that (currently only `cmd`, `entrypoint` and `workdir`)
 
 ```Dockerfile
-FROM <ALIAS_OR_IMAGE>
+FROM <ALIAS>
 ```
 
 ### COPY
