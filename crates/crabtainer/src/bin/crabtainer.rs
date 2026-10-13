@@ -1,3 +1,15 @@
+//! # Crabtainer CLI
+//!
+//! The command-line entry point of the container engine.
+//!
+//! Subcommands cover the full lifecycle: [`build`](Commands::Build) layouts
+//! from a `Crabtainerfile`, [`run`](Commands::Run) containers (foreground or
+//! detached), and manage containers (`ps`, `stop`, `rm`, `start`,
+//! `restart`, `exec`, `inspect`, `logs`), images, layouts, volumes, and
+//! system configuration (`system init`, `system autostart`).
+//!
+//! Every invocation requires root privileges (checked at startup).
+
 use clap::{Parser, Subcommand};
 use crabtainer::engine::build::builder::build_layout;
 use crabtainer::engine::runtime::container::{run_container, spawn_detach_container};
@@ -27,6 +39,8 @@ struct Cli {
     command: Commands,
 }
 
+/// All top-level subcommands of the `crabtainer` binary. Variant doc comments
+/// double as the clap help text.
 #[derive(Subcommand)]
 enum Commands {
     /// Create and start a container from a specific layout
@@ -158,6 +172,7 @@ enum Commands {
     },
 }
 
+/// Subcommands for managing persistent volumes.
 #[derive(Subcommand)]
 enum VolumeActions {
     /// Remove all unused local volumes
@@ -170,6 +185,7 @@ enum VolumeActions {
     Remove { name: String },
 }
 
+/// Subcommands for system-level crabtainer configuration.
 #[derive(Subcommand)]
 enum SystemActions {
     Prune,
@@ -179,6 +195,7 @@ enum SystemActions {
     Autostart,
 }
 
+/// Subcommands for managing downloaded images.
 #[derive(Subcommand)]
 enum ImageActions {
     /// List all images
@@ -202,6 +219,7 @@ enum ImageActions {
     Inspect { name: String },
 }
 
+/// Subcommands for managing built layouts.
 #[derive(Subcommand)]
 enum LayoutActions {
     /// List all layouts
@@ -220,6 +238,10 @@ enum LayoutActions {
     },
 }
 
+/// Entry point of the `crabtainer` binary.
+///
+/// Parses the CLI, verifies root privileges, and dispatches to the engine
+/// code behind the chosen subcommand.
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -782,6 +804,10 @@ async fn main() {
     }
 }
 
+/// Removes a container's runtime directory (`containers/<id>/`), refusing to
+/// touch active containers.
+///
+/// Active containers must be stopped first; the id is printed on success.
 async fn handle_deletion_of_container(id: String) {
     let runtime_dir = CrabtainerPaths::runtime_dir().join(&id);
 
@@ -801,6 +827,10 @@ async fn handle_deletion_of_container(id: String) {
     }
 }
 
+/// Finds the container id associated with a container *name* by scanning each
+/// container's `config.json` for a matching `container_name`.
+///
+/// Returns `None` when no container uses that name.
 async fn search_id_by_name(name: String) -> Option<String> {
     let runtime_dir = CrabtainerPaths::runtime_dir();
     let entries = std::fs::read_dir(&runtime_dir).expect("[ERROR] Failed to read dir");
@@ -825,6 +855,9 @@ async fn search_id_by_name(name: String) -> Option<String> {
     None
 }
 
+/// Reads the container's stored PID from its `config.json`.
+///
+/// Returns `0` when the config cannot be found or parsed.
 fn find_pid<'a, P>(id: &String, container_dir: P) -> i32
 where
     P: Into<Cow<'a, Path>>,
@@ -843,6 +876,17 @@ where
     target_pid
 }
 
+/// Runs `exec_in_container` off the async runtime on a blocking thread.
+///
+/// # Arguments
+///
+/// * `container_pid` - Host PID of the container's root process.
+/// * `container_id` - Container id, used to locate its rootfs for TTY execs.
+/// * `opts` - [`ExecOptions`] describing the command to run.
+///
+/// # Errors
+///
+/// Fails if the blocking task cannot be awaited to completion.
 pub async fn handle_exec(
     container_pid: i32,
     container_id: String,
@@ -861,6 +905,8 @@ pub async fn handle_exec(
 mod tests {
     use super::*;
 
+    /// Parses `args` as a `run` invocation and returns the resulting
+    /// [`Commands`] variant.
     fn parse_run(args: &[&str]) -> Commands {
         let mut full = vec!["crabtainer", "run"];
         full.extend_from_slice(args);
@@ -869,6 +915,7 @@ mod tests {
     }
 
     #[test]
+    /// `run` parses every flag, option, and repeated (`-p`/`-e`/`-v`) values.
     fn run_parses_all_parameters() {
         match parse_run(&[
             "-n",
@@ -936,6 +983,7 @@ mod tests {
     }
 
     #[test]
+    /// All `run` options default to their empty/`None`/`Never` values.
     fn run_limits_default_to_none() {
         match parse_run(&["my-layout"]) {
             Commands::Run {
@@ -970,6 +1018,7 @@ mod tests {
     }
 
     #[test]
+    /// Trailing words after `-c` become the command's positional args.
     fn run_collects_trailing_args() {
         match parse_run(&["my-layout", "-c", "/bin/sh", "echo", "hi"]) {
             Commands::Run { args, command, .. } => {
@@ -981,6 +1030,7 @@ mod tests {
     }
 
     #[test]
+    /// Trailing args without a `-c/--command` are rejected.
     fn run_requires_command_when_args_given() {
         let result = Cli::try_parse_from(["crabtainer", "run", "my-layout", "some-arg"]);
         assert!(
@@ -990,6 +1040,8 @@ mod tests {
     }
 
     #[test]
+    /// Long flag spellings (`--cpu-limit`, `--memory-limit`, `--command`)
+    /// parse correctly.
     fn run_accepts_long_flag_forms() {
         match parse_run(&[
             "my-layout",
@@ -1015,6 +1067,7 @@ mod tests {
     }
 
     #[test]
+    /// `build` parses its `-f`/`-t` options.
     fn build_parses_file_and_tag() {
         let cli = Cli::try_parse_from([
             "crabtainer",
@@ -1035,6 +1088,7 @@ mod tests {
     }
 
     #[test]
+    /// `build` falls back to `Crabtainerfile` when `-f` is omitted.
     fn build_uses_default_file() {
         let cli = Cli::try_parse_from(["crabtainer", "build", "-t", "my-image"]).unwrap();
         match cli.command {

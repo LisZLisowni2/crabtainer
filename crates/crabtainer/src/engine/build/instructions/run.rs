@@ -1,9 +1,21 @@
+//! The `RUN` build step: executing a shell command inside the layout.
+//!
+//! `RUN` chroots into the layout's rootfs and runs the command with `/bin/sh
+//! -c`. Requires root; pseudo-filesystems are mounted around the chroot for
+//! the duration of the command and unmounted afterwards.
+
 use crate::engine::support::paths::CrabtainerPaths;
 use nix::mount::{MsFlags, mount, umount};
 use nix::unistd::{chdir, chroot};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
+/// Mounts `proc`, `sysfs`, and a bind of host `/dev` into the rootfs so the
+/// chrooted command has working pseudo-filesystems.
+///
+/// # Errors
+///
+/// Returns an error string if any mount fails.
 async fn pseudo_filesystems_mount(rootfs: &std::path::Path) -> Result<(), String> {
     mount(
         Some("proc"),
@@ -35,6 +47,10 @@ async fn pseudo_filesystems_mount(rootfs: &std::path::Path) -> Result<(), String
     Ok(())
 }
 
+/// Unmounts the `proc`, `sys`, and `dev` mounts previously created by
+/// [`pseudo_filesystems_mount`].
+///
+/// Unmount failures are treated as fatal via `expect`.
 async fn pseudo_filesystems_umount(rootfs: &std::path::Path) -> Result<(), String> {
     let targets = [
         (rootfs.join("proc")),
@@ -50,6 +66,22 @@ async fn pseudo_filesystems_umount(rootfs: &std::path::Path) -> Result<(), Strin
     Ok(())
 }
 
+/// Runs a shell command inside the layout's rootfs.
+///
+/// Writes a static `resolv.conf` (pointing at 1.1.1.1 / 8.8.8.8) into the
+/// rootfs, mounts the pseudo-filesystems, chroots into the rootfs, executes
+/// `sh -c <command>` from the given workdir, and unmounts afterwards.
+///
+/// # Arguments
+///
+/// * `output_layout_name` - Layout whose `rootfs/` is the chroot target.
+/// * `workdir` - Working directory inside the rootfs (`/` when `None`).
+/// * `command` - Shell command line to execute.
+///
+/// # Errors
+///
+/// Returns an error string if the resolv.conf cannot be written or the
+/// command exits non-zero or cannot be spawned.
 pub async fn run_in_container(
     output_layout_name: &String,
     workdir: Option<String>,

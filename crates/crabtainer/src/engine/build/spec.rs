@@ -109,6 +109,8 @@ mod tests {
     use super::*;
     use oci_spec::runtime::Spec;
 
+    /// Prepares a representative [`LayoutOpts`] with both limits, args, workdir,
+    /// and an env var set.
     fn sample_opts() -> LayoutOpts {
         LayoutOpts {
             memory_limit: Some(2048.0),
@@ -124,6 +126,7 @@ mod tests {
     }
 
     #[test]
+    /// [`LayoutOpts`] survives a JSON serialize/deserialize round trip.
     fn layout_opts_serializes_round_trip() {
         let opts = sample_opts();
         let json = serde_json::to_string(&opts).unwrap();
@@ -144,6 +147,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `save_config` writes CPU/memory limits, args, cwd, and rootfs path.
     async fn save_config_writes_limits_and_args() {
         let dir = tempfile::tempdir().unwrap();
         save_config(sample_opts(), dir.path().to_path_buf())
@@ -169,6 +173,8 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `save_config` falls back to defaults (1 CPU period, 1 GiB memory,
+    /// cwd `/`) when no limits are given.
     async fn save_config_uses_defaults_without_limits() {
         let dir = tempfile::tempdir().unwrap();
         let opts = LayoutOpts {

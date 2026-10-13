@@ -5,12 +5,22 @@
 
 ---
 
-# User Guide
+## User Guide
 
 - [Crabtainerfile Reference](crabtainerfile.md)
+- [CLI Reference](./cli-reference.md)
+- [Managing Containers](lifecycle.md)
+- [Networking](networking.md)
+- [Storage and Volumes](./storage-and-volumes.md)
 
 ---
 
-# Architecture & Design
+## Architecture & Design
 
 - [Daemonless Architecture](architecture.md)
+
+---
+
+## Troubleshooting
+
+- [Troubleshooting](troubleshooting.md)

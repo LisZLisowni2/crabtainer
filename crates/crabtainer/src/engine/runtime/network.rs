@@ -1,3 +1,12 @@
+//! Container networking: bridge setup, veth wiring, IPAM, and iptables
+//! rules.
+//!
+//! [`NetworkManager`] creates the `crabtainer0` bridge, attaches per-container
+//! veth pairs into their network namespaces, and manages iptables NAT/forward
+//! rules (including port forwarding). [`Ipam`] leases IP addresses from a
+//! subnet, persisting allocations to a JSON database so they survive
+//! restarts.
+
 use futures::stream::TryStreamExt;
 use ipnet::Ipv4Net;
 use rtnetlink::{
@@ -16,19 +25,32 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
+/// Manages bridge networking for the container runtime.
+///
+/// Owns an rtnetlink [`Handle`] plus the identity of the shared bridge
+/// (`crabtainer0`) and its subnet. One instance is created per container
+/// spawn (or per host-level operation) and drives the netlink `Handle`.
 pub struct NetworkManager {
+    /// rtnetlink connection handle used for all netlink requests.
     handle: Handle,
+    /// Name of the bridge interface (`crabtainer0`).
     bridge_name: String,
+    /// Gateway IP of the container subnet on the bridge.
     gateway_ip: Ipv4Addr,
+    /// Prefix length of the container subnet (e.g. `16` for `/16`).
     subnet_prefix: u8,
 }
 
+/// A single `host:container` port forwarding mapping.
 pub struct PortForwarding {
+    /// Port on the host side.
     host: String,
+    /// Port on the container side.
     container: String,
 }
 
 impl PortForwarding {
+    /// Creates a port forwarding entry from a host port and a container port.
     pub fn new(host_port: String, container_port: String) -> Self {
         Self {
             host: host_port,
@@ -37,33 +59,63 @@ impl PortForwarding {
     }
 }
 
+/// Errors that can occur during IP address management.
 #[derive(Error, Debug)]
 pub enum IpamError {
+    /// The subnet has no free addresses left to allocate.
     #[error("Subnet exhausted: no available IPs left")]
     SubnetExhausted,
+    /// The requested address is already leased to another container.
     #[error("IP {0} is already allocated")]
     AlreadyAllocated(Ipv4Addr),
+    /// The given container has no lease to release.
     #[error("Container {0} has no allocated IP")]
     ContainerNotFound(String),
+    /// Underlying filesystem error while loading or persisting state.
     #[error("IO Error: {0}")]
     Io(#[from] std::io::Error),
+    /// State database could not be serialized or deserialized.
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
 
+/// Serializable snapshot of the IPAM state, stored in `<base>/ipam.json`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IpamState {
+    /// The subnet addresses are allocated from.
     subnet: Ipv4Net,
+    /// Gateway address reserved at the start of the subnet.
     gateway: Ipv4Addr,
+    /// Container id → leased IP address.
     allocations: HashMap<String, Ipv4Addr>,
 }
 
+/// Allocates and releases container IP addresses from a subnet.
+///
+/// State is persisted to a JSON database on every mutation, so leases survive
+/// process restarts. A temporary file plus rename keeps the write atomic.
 pub struct Ipam {
+    /// Path of the JSON state database.
     db_path: PathBuf,
+    /// In-memory state, shared behind an async mutex.
     state: Arc<Mutex<IpamState>>,
 }
 
 impl Ipam {
+    /// Loads an existing IPAM database or creates a new one for `subnet_cidr`.
+    ///
+    /// For a new database the first address of the subnet is reserved as the
+    /// gateway and the initial state is persisted immediately.
+    ///
+    /// # Arguments
+    ///
+    /// * `subnet_cidr` - Subnet in CIDR form, e.g. `172.19.0.0/16`.
+    /// * `db_path` - Where the state database lives (or should be created).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IpamError`] when the CIDR is invalid or the database cannot
+    /// be read or written.
     pub fn new<P: AsRef<Path>>(subnet_cidr: &str, db_path: P) -> Result<Self, IpamError> {
         let path = db_path.as_ref().to_path_buf();
 
@@ -104,18 +156,26 @@ impl Ipam {
         })
     }
 
+    /// Returns the gateway IP of the subnet.
     pub async fn gateway(&self) -> Ipv4Addr {
         let state = self.state.lock().await;
 
         state.gateway
     }
 
+    /// Returns the prefix length of the subnet (e.g. `16` for `/16`).
     pub async fn subnet(&self) -> u8 {
         let state = self.state.lock().await;
 
         state.subnet.prefix_len()
     }
 
+    /// Allocates an IP address for `container_id`, handing back an existing
+    /// lease if the container already has one.
+    ///
+    /// The gateway address is never handed out. Returns
+    /// [`IpamError::SubnetExhausted`] when no address is free. The updated
+    /// state is persisted before returning.
     pub async fn allocate(&self, container_id: &String) -> Result<Ipv4Addr, IpamError> {
         let mut state = self.state.lock().await;
 
@@ -140,6 +200,10 @@ impl Ipam {
         Ok(next_ip)
     }
 
+    /// Releases the IP lease of `container_id`, returning the freed address.
+    ///
+    /// Returns [`IpamError::ContainerNotFound`] when the container has no
+    /// lease. The updated state is persisted before returning.
     pub async fn release(&self, container_id: &String) -> Result<Ipv4Addr, IpamError> {
         let mut state = self.state.lock().await;
 
@@ -152,6 +216,10 @@ impl Ipam {
         Ok(released_ip)
     }
 
+    /// Persists `state` to the database atomically (temp file + rename).
+    ///
+    /// Creates the parent directory if needed and fsyncs the file before
+    /// renaming it into place.
     fn persist_sync(&self, state: &IpamState) -> Result<(), IpamError> {
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -176,6 +244,17 @@ impl Ipam {
 }
 
 impl NetworkManager {
+    /// Creates a [`NetworkManager`] on a fresh rtnetlink connection.
+    ///
+    /// # Arguments
+    ///
+    /// * `bridge_name` - Name of the bridge interface (`crabtainer0`).
+    /// * `gateway_ip` - Gateway IP assigned to the bridge.
+    /// * `subnet_prefix` - Prefix length of the container subnet.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a netlink connection cannot be established.
     pub async fn new(
         bridge_name: String,
         gateway_ip: Ipv4Addr,
@@ -192,6 +271,14 @@ impl NetworkManager {
         })
     }
 
+    /// Creates the host-side container network: the bridge interface, its
+    /// gateway address, bringing it up, and the iptables NAT/forward rules.
+    ///
+    /// Skips everything (with a warning) when the bridge already exists.
+    ///
+    /// # Errors
+    ///
+    /// Fails if any netlink operation or iptables call fails.
     pub async fn init_global_network(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.get_link_index(self.bridge_name.as_str()).await.is_ok() {
             println!("[NETWORK WARN] Global network currently initialized. Skipping");
@@ -243,6 +330,21 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Adds the iptables rules that give containers outbound connectivity.
+    ///
+    /// Creates a `CRABTAINER` chain in the `filter` table and appends the
+    /// rules needed for outbound MASQUERADE, container-subnet forwarding,
+    /// connection tracking of return traffic, and a hook from the `FORWARD`
+    /// chain into the `CRABTAINER` chain. Existing rules are left untouched.
+    ///
+    /// # Arguments
+    ///
+    /// * `bridge_name` - Name of the bridge (`crabtainer0`).
+    /// * `subnet_mask` - Container subnet in CIDR form, e.g. `172.19.0.0/16`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if iptables cannot be invoked or a chain/rule cannot be managed.
     pub async fn add_iptables_rules(
         &self,
         bridge_name: &str,
@@ -295,6 +397,20 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Removes the iptables rules created by
+    /// [`add_iptables_rules`](Self::add_iptables_rules).
+    ///
+    /// Note: this implementation's rule strings do not always match the ones
+    /// added, so it is mostly best-effort cleanup.
+    ///
+    /// # Arguments
+    ///
+    /// * `bridge_name` - Name of the bridge (`crabtainer0`).
+    /// * `subnet_mask` - Container subnet in CIDR form.
+    ///
+    /// # Errors
+    ///
+    /// Fails if iptables cannot be invoked.
     pub async fn remove_iptables_rules(
         &self,
         bridge_name: &str,
@@ -333,6 +449,13 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Attaches a container to the bridge using a caller-provided netlink
+    /// [`Handle`].
+    ///
+    /// Builds a temporary [`NetworkManager`] around the supplied handle (e.g.
+    /// one already entered into the container's network namespace) and
+    /// delegates to [`attach_container`](Self::attach_container). Failures
+    /// are logged, not propagated.
     pub async fn attach_container_with_custom_handle(
         &self,
         container_id: &str,
@@ -357,6 +480,18 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Parses raw port strings into [`PortForwarding`] entries.
+    ///
+    /// Supported formats (see the comment inside the function):
+    ///
+    /// - single pair: `3432:5835`
+    /// - equal-sized ranges: `2000-3000:2000-3000` (expanded pair by pair)
+    ///
+    /// Ranges of different sizes or mixed single/range forms are rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string for malformed or mismatched port specs.
     pub async fn handle_ports(&self, ports: Vec<String>) -> Result<Vec<PortForwarding>, String> {
         /*
          * Possible values:
@@ -416,6 +551,15 @@ impl NetworkManager {
         Ok(parsed_ports)
     }
 
+    /// Adds the iptables DNAT rules that forward host ports to `container_ip`.
+    ///
+    /// For every port pair this installs a `PREROUTING` DNAT rule, an
+    /// `OUTPUT` rule for localhost traffic, and a `POSTROUTING` MASQUERADE
+    /// rule for the container. Existing rules are left untouched.
+    ///
+    /// # Errors
+    ///
+    /// Fails if iptables cannot be invoked.
     pub async fn add_port_forwarding(
         &self,
         ports: Vec<PortForwarding>,
@@ -466,6 +610,12 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Removes the iptables DNAT rules set up by
+    /// [`add_port_forwarding`](Self::add_port_forwarding) for `container_ip`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if iptables cannot be invoked.
     pub async fn remove_port_forwarding(
         &self,
         ports: Vec<PortForwarding>,
@@ -516,6 +666,27 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Attaches a running container to the bridge network.
+    ///
+    /// Creates a veth pair (`veth_<short-id>` on the host, `vethc_<short-id>`
+    /// in the container), slaves the host side to the bridge, moves the
+    /// container side into the container's network namespace, then — inside
+    /// that namespace — brings the interface up, assigns `ip`, adds a default
+    /// route via the gateway, and brings `lo` up.
+    ///
+    /// Returns early when the container has no network namespace (e.g. it
+    /// already exited).
+    ///
+    /// # Arguments
+    ///
+    /// * `container_id` - Container id, used for the veth names.
+    /// * `container_pid` - Host PID of the container's root process.
+    /// * `ip` - IP address to assign inside the container.
+    ///
+    /// # Errors
+    ///
+    /// Fails if any netlink operation fails, the container's netns cannot be
+    /// opened, or the in-namespace setup thread errors.
     pub async fn attach_container(
         &self,
         container_id: &str,
@@ -676,6 +847,11 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// Looks up the interface index of `name` via rtnetlink.
+    ///
+    /// # Errors
+    ///
+    /// Returns an rtnetlink error if the interface does not exist.
     async fn get_link_index(&self, name: &str) -> Result<u32, rtnetlink::Error> {
         let mut links = self.handle.link().get().match_name(name).execute();
 
@@ -695,11 +871,13 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Creates an [`Ipam`] for `subnet` backed by `db_path` for a test.
     fn new_ipam(subnet: &str, db_path: PathBuf) -> Ipam {
         Ipam::new(subnet, db_path).unwrap()
     }
 
     #[tokio::test]
+    /// A fresh IPAM derives the gateway and prefix from the CIDR.
     async fn new_derives_gateway_and_subnet_from_cidr() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
@@ -708,6 +886,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Invalid CIDR strings are rejected at construction.
     async fn new_rejects_invalid_cidr() {
         let dir = tempdir().unwrap();
         let result = Ipam::new("not-a-cidr", dir.path().join("ipam.json"));
@@ -715,6 +894,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Allocation starts after the gateway and increments per container.
     async fn allocate_starts_after_gateway_and_increments() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
@@ -729,6 +909,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Re-allocating for the same container returns its existing lease.
     async fn allocate_is_idempotent_for_same_container() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
@@ -739,6 +920,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// A tiny subnet runs out of allocatable addresses.
     async fn allocate_exhausts_small_subnet() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/30", dir.path().join("ipam.json"));
@@ -751,6 +933,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Releasing an IP makes it available for the next allocation.
     async fn release_returns_ip_and_frees_it_for_reuse() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
@@ -762,6 +945,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Releasing a lease for an unknown container errors.
     async fn release_unknown_container_errors() {
         let dir = tempdir().unwrap();
         let ipam = new_ipam("172.19.0.0/16", dir.path().join("ipam.json"));
@@ -770,6 +954,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// IPAM state survives a reload from the database.
     async fn state_persists_and_restores_on_reload() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("ipam.json");

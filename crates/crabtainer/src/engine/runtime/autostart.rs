@@ -1,3 +1,9 @@
+//! Autostarting detached containers after a host reboot.
+//!
+//! On boot (via the systemd autostart service or `system autostart`) this
+//! module walks the runtime directory and re-spawns every detached container
+//! whose [`RestartPolicy`] says it should still be running.
+
 use crate::engine::runtime::container::spawn_detach_container;
 use crate::engine::runtime::network::Ipam;
 use crate::engine::runtime::options::{
@@ -5,6 +11,24 @@ use crate::engine::runtime::options::{
 };
 use crate::engine::support::paths::CrabtainerPaths;
 
+/// Re-spawns all detached containers that should still be running after a
+/// host reboot.
+///
+/// The [`RestartPolicy`] decides what "should still be running" means:
+///
+/// - `Never` — never restarted.
+/// - `Always` — restarted unless the container was explicitly stopped.
+/// - `UnlessStopped` — restarted unless the container was explicitly stopped.
+/// - `OnFailure` — restarted only when the container exited with an error.
+///
+/// Before restarting, every container's IPAM lease is released so the fresh
+/// spawn can re-allocate an address. Containers without a readable
+/// `config.json` are skipped.
+///
+/// # Errors
+///
+/// Returns an error if the runtime directory cannot be read or a stored
+/// config cannot be loaded; individual restart failures are only logged.
 pub async fn autostart_detached() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_dir = CrabtainerPaths::runtime_dir();
 

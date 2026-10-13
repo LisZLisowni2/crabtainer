@@ -1,15 +1,35 @@
+//! The `COPY` build step: copying files into the layout's rootfs.
+//!
+//! Supports single paths, glob patterns, and the `*` wildcard for the whole
+//! build directory. Copies honor `.crabtainerignore` rules (glob patterns,
+//! negation with `!`, comments, and blank lines), implemented by
+//! [`CrabtainerIgnore`].
+
 use crate::engine::support::paths::CrabtainerPaths;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Evaluator for `.crabtainerignore` rules rooted at a build directory.
+///
+/// Rules are read from `<root>/.crabtainerignore`, one per line. A rule is a
+/// glob pattern relative to `root`; a leading `!` negates it. Later rules
+/// override earlier ones (including negations). The ignore file itself is
+/// always ignored.
 pub struct CrabtainerIgnore {
+    /// Compiled rules as `(globset, is_negated)` pairs, in file order.
     rules: Vec<(GlobSet, bool)>,
+    /// Build directory the rules are anchored to.
     root: PathBuf,
 }
 
 impl CrabtainerIgnore {
+    /// Loads and compiles the `.crabtainerignore` file from `root`.
+    ///
+    /// Skips blank lines and `#` comments. Non-glob rules are expanded to
+    /// match both the exact path and everything below it (like a directory
+    /// rule). Returns an empty set of rules when no ignore file exists.
     pub fn new(root: impl AsRef<Path>) -> Self {
         let root = root.as_ref().to_path_buf();
         let ignore_file = root.join(".crabtainerignore");
@@ -60,6 +80,12 @@ impl CrabtainerIgnore {
         Self { root, rules }
     }
 
+    /// Returns whether `absolute_path` is covered by the ignore rules.
+    ///
+    /// The `.crabtainerignore` file itself is always considered ignored. For
+    /// every matching rule the verdict is updated: matched (non-negated)
+    /// rules ignore, matched negated rules re-include, so the last matching
+    /// rule wins.
     pub fn is_ignored(&self, absolute_path: &Path) -> bool {
         if absolute_path == self.root.join(".crabtainerignore") {
             return true;
@@ -75,6 +101,10 @@ impl CrabtainerIgnore {
         ignored
     }
 
+    /// Walks `source_dir` recursively and returns the absolute paths of all
+    /// regular files that are not ignored.
+    ///
+    /// Ignored directories are pruned entirely (never descended into).
     pub fn collect_files(&self, source_dir: &Path) -> Vec<PathBuf> {
         let mut files = Vec::new();
 
@@ -100,6 +130,29 @@ impl CrabtainerIgnore {
     }
 }
 
+/// Copies files from the build directory into the layout's rootfs.
+///
+/// Three source forms are supported:
+///
+/// 1. `*` — the whole build directory, respecting `.crabtainerignore`.
+/// 2. A glob pattern (`*`, `?`, `[...]`), expanded via the [`glob`] crate.
+/// 3. A single static path.
+///
+/// The relative path under the *build directory* is replicated under
+/// `rootfs/<dst>/`. Directories are copied recursively; ignored paths are
+/// skipped.
+///
+/// # Arguments
+///
+/// * `src` - Source path or pattern, relative to `build_dir`.
+/// * `dst` - Destination directory inside the container rootfs.
+/// * `output_layout_name` - Layout whose rootfs is the copy target.
+/// * `build_dir` - Absolute path of the directory the Crabtainerfile lives in.
+///
+/// # Errors
+///
+/// Returns an error string for invalid glob patterns, missing parent dirs,
+/// and failed copies. Patterns matching nothing log a warning instead.
 pub async fn copy_to_layout(
     src: &str,
     dst: &str,
@@ -241,17 +294,22 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
+    /// Creates `rel` (a relative path) under `root` with "content" inside.
     fn write_file(root: &Path, rel: &str) {
         let path = root.join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "content").unwrap();
     }
 
+    /// Writes `rules` to `<root>/.crabtainerignore` and returns the compiled
+    /// [`CrabtainerIgnore`].
     fn ignore_with(root: &Path, rules: &str) -> CrabtainerIgnore {
         fs::write(root.join(".crabtainerignore"), rules).unwrap();
         CrabtainerIgnore::new(root)
     }
 
+    /// Collects the files of `ig` under `root`, sorted and relativized to
+    /// `root` for easy comparison.
     fn collected(root: &Path, ig: &CrabtainerIgnore) -> Vec<PathBuf> {
         let mut files = ig.collect_files(root);
         files.sort();
@@ -266,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    /// Without an ignore file every file is collected.
     fn no_ignore_file_keeps_all_files() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");
@@ -284,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    /// The `.crabtainerignore` file itself is always excluded.
     fn crabtainerignore_itself_excluded_even_without_rules() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");
@@ -294,6 +354,7 @@ mod tests {
     }
 
     #[test]
+    /// A file glob like `*.txt` matches at any depth.
     fn file_pattern_ignores_at_any_depth() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");
@@ -305,6 +366,7 @@ mod tests {
     }
 
     #[test]
+    /// A plain directory rule prunes the whole subtree.
     fn directory_rule_prunes_whole_subtree() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "target/debug/app");
@@ -318,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    /// A trailing slash still makes the rule target a directory.
     fn trailing_slash_directory_rule_ignores_dir() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "build/out.txt");
@@ -331,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    /// A leading slash anchors the rule to the ignore root.
     fn leading_slash_anchors_rule_to_root() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "node_modules/a.js");
@@ -344,6 +408,7 @@ mod tests {
     }
 
     #[test]
+    /// Wildcard patterns ignore every matching file.
     fn wildcard_pattern_ignores_matches() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "src/a.rs");
@@ -358,6 +423,7 @@ mod tests {
     }
 
     #[test]
+    /// `!` rules re-include a specific file.
     fn negation_reincludes_specific_file() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "keep.txt");
@@ -368,6 +434,7 @@ mod tests {
     }
 
     #[test]
+    /// A later negation overrides an earlier ignore rule.
     fn later_negation_overrides_previous_rule() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");
@@ -378,6 +445,7 @@ mod tests {
     }
 
     #[test]
+    /// A later ignore rule overrides an earlier negation.
     fn later_rule_overrides_previous_negation() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "keep.txt");
@@ -387,6 +455,7 @@ mod tests {
     }
 
     #[test]
+    /// A negated directory rule re-includes its contents.
     fn negated_directory_reincludes_contents() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "build/main.rs");
@@ -400,6 +469,7 @@ mod tests {
     }
 
     #[test]
+    /// Comments and blank lines in the ignore file are skipped.
     fn comments_and_blank_lines_are_skipped() {
         let dir = tempdir().unwrap();
         write_file(dir.path(), "a.txt");

@@ -1,3 +1,9 @@
+//! Executing commands inside a running container.
+//!
+//! The exec process joins the target container's namespaces (net, pid, mnt)
+//! with `setns`, so it can take two shapes: a full PTY-based terminal session
+//! ([`exec_with_tty`]) or a plain pipe-based one ([`exec_with_pipes`]).
+
 use crate::engine::support::paths::CrabtainerPaths;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nix::pty::OpenptyResult;
@@ -9,13 +15,42 @@ use std::ffi::CString;
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, AsRawFd};
 
+/// Options describing a single `exec` invocation.
 pub struct ExecOptions {
+    /// Whether stdin from the host should be forwarded to the container
+    /// process (used with a TTY session).
     pub interactive: bool,
+    /// Whether to allocate a PTY for the session (`-t`).
     pub tty: bool,
+    /// Command to execute inside the container.
     pub cmd: String,
+    /// Optional positional arguments passed to the command.
     pub args: Option<Vec<String>>,
 }
 
+/// Executes a command inside the container on an allocated PTY.
+///
+/// A pseudo-terminal pair is created; the parent process puts the host
+/// terminal into raw mode and pumps stdin/stdout through the master side,
+/// while the child joins the container's namespaces, makes the PTY its
+/// controlling terminal and its stdio, and `execvp`s the command. Inside the
+/// container the command runs chrooted into the container's rootfs.
+///
+/// # Arguments
+///
+/// * `container_pid` - Host PID of the container's root process, used to
+///   locate its namespaces.
+/// * `container_id` - Container id, used to locate its rootfs.
+/// * `opts` - Exec options (interactive flag, command, args).
+///
+/// # Returns
+///
+/// The child's wait status (always `0` on the parent path).
+///
+/// # Errors
+///
+/// Returns an error when the PTY cannot be created, raw mode cannot be
+/// toggled, or forking fails.
 pub fn exec_with_tty(
     container_pid: i32,
     container_id: String,
@@ -130,6 +165,25 @@ pub fn exec_with_tty(
     }
 }
 
+/// Executes a command inside the container using plain pipes instead of a
+/// PTY.
+///
+/// Forks, joins the container's namespaces in the child, and `execvp`s the
+/// command. The child inherits the caller's stdio directly.
+///
+/// # Arguments
+///
+/// * `container_pid` - Host PID of the container's root process, used to
+///   locate its namespaces.
+/// * `opts` - Exec options (command and args).
+///
+/// # Returns
+///
+/// The child's wait status.
+///
+/// # Errors
+///
+/// Returns an error when forking fails.
 pub fn exec_with_pipes(
     container_pid: i32,
     opts: ExecOptions,
@@ -165,6 +219,16 @@ pub fn exec_with_pipes(
     }
 }
 
+/// Executes a command inside a running container, choosing the PTY path when
+/// `opts.tty` is set and the pipe path otherwise.
+///
+/// # Returns
+///
+/// The child's wait status.
+///
+/// # Errors
+///
+/// Returns an error if the underlying exec fails.
 pub fn exec_in_container(
     container_pid: i32,
     container_id: String,
@@ -177,6 +241,11 @@ pub fn exec_in_container(
     }
 }
 
+/// Joins the network, PID, and mount namespaces of the container process via
+/// `setns`.
+///
+/// Exits the process with an error message when any namespace file cannot be
+/// opened or entered.
 fn join_namespaces(container_pid: i32) {
     let namespaces = [
         // ("ipc", CloneFlags::CLONE_NEWIPC),

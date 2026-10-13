@@ -1,3 +1,19 @@
+//! System-level configuration helpers.
+//!
+//! Writes the host configuration crabtainer needs to operate: a systemd
+//! autostart unit pointing at the current executable, and sysctl rules that
+//! enable local-network routing for the container bridge.
+
+/// Writes the systemd oneshot unit `crabtainer-autostart.service` that runs
+/// `crabtainer system autostart` after the network is online.
+///
+/// The unit's `ExecStart` points at the currently running executable, so it
+/// stays valid across install locations.
+///
+/// # Errors
+///
+/// Returns an error if the executable path is invalid or the unit file cannot
+/// be written to `/etc/systemd/system/`.
 pub async fn init_systemd_config() -> Result<(), Box<dyn std::error::Error>> {
     let service_path = "/etc/systemd/system/crabtainer-autostart.service";
 
@@ -28,6 +44,11 @@ WantedBy=multi-user.target
     Ok(())
 }
 
+/// Enables `net.ipv4.conf.all.route_localnet` via a sysctl drop-in and
+/// applies it immediately.
+///
+/// The rule is written to `/etc/sysctl.d/99-crabtainer.conf` and applied with
+/// `sysctl -p`. Failures to apply the rule are logged but not fatal.
 pub async fn enable_route_localnet() {
     let file_path = "/etc/sysctl.d/99-crabtainer.conf";
     let content = "net.ipv4.conf.all.route_localnet = 1";
@@ -51,6 +72,15 @@ pub async fn enable_route_localnet() {
     };
 }
 
+/// Initializes all crabtainer system configuration.
+///
+/// Always enables the local-network routing sysctl, and additionally installs
+/// the systemd autostart unit when the host's `/sbin/init` reports it is
+/// running systemd.
+///
+/// # Errors
+///
+/// Returns an error if `stat` can't be run or its output can't be decoded.
 pub async fn init_crabtainer_system_config() -> Result<(), String> {
     enable_route_localnet().await;
 
