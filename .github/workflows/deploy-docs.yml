@@ -1,4 +1,4 @@
-name: Deploy mdBook Documentation
+name: Deploy Documentation
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "docs/**"
+      - "src/**"
+      - "Cargo.toml"
       - ".github/workflows/deploy-docs.yml"
 
 permissions:
@@ -27,6 +29,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
@@ -38,10 +43,20 @@ jobs:
       - name: Build documentation
         run: mdbook build docs
 
+      - name: Build rustdoc
+        run: cargo doc --no-deps --document-private-items
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/api
+          cp -r docs/book/* site/
+          cp -r target/doc/* site/api/
+          echo '<meta http-equiv="refresh" content="0; url=crabtainer/index.html">' > site/api/index.html
+
       - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs/book
+          path: ./site
 
       - name: Deploy to GitHub Pages
         id: deployment
