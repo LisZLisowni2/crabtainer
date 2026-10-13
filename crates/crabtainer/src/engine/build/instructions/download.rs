@@ -1,9 +1,37 @@
+//! The `DOWNLOAD` build step: fetching container images from a registry.
+//!
+//! Pulls an image from Docker Hub (via `oci-client`), stores its config and
+//! layer blobs under `<base>/images/<alias>/`, where the `FROM` step can pick
+//! them up later.
+
 use crate::engine::support::paths::CrabtainerPaths;
 use oci_client::client::{Client, ClientConfig};
 use oci_client::secrets::RegistryAuth;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
+/// Downloads an image from Docker Hub into the local image store unless it is
+/// already present.
+///
+/// The image config is saved as `config.json` and each layer blob as
+/// `layer_<i>.tar.gz`, all under `<base>/images/<alias>/`. Existing images
+/// are only replaced when `is_override` is set.
+///
+/// # Arguments
+///
+/// * `image_ref` - Registry reference to pull, e.g. `ubuntu:latest`.
+/// * `alias` - Local name the image is stored under.
+/// * `is_override` - Whether an existing image with the same alias should be
+///   deleted and re-downloaded (`OVERRIDE` in the Crabtainerfile).
+///
+/// # Returns
+///
+/// The path of the created image directory.
+///
+/// # Errors
+///
+/// Returns an error string for invalid references, registry or pull
+/// failures, and IO errors while writing the image.
 pub async fn download_image_if_missing(
     image_ref: &str,
     alias: &str,
@@ -99,6 +127,8 @@ mod tests {
     use crate::engine::support::test_utils::with_home;
 
     #[tokio::test]
+    /// An empty image reference is rejected with an "Invalid image reference"
+    /// error.
     async fn download_rejects_invalid_image_reference() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_str().unwrap().to_string();

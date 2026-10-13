@@ -1,3 +1,18 @@
+//! # crabtainer_init
+//!
+//! Minimal PID 1 init program for the inside of a container.
+//!
+//! The `crabtainer` runtime bind-mounts this binary read-only into the
+//! container as `/dev/.crabtainer_init` and always execs the containerized
+//! command through it. As PID 1 it:
+//!
+//! - spawns the user command as a child,
+//! - forwards `SIGINT`/`SIGTERM` to that child,
+//! - reaps zombies with `waitpid`, and
+//! - propagates the child's exit status (or `128 + signal`) to the host.
+//!
+//! It must live next to the `crabtainer` binary in the same target directory.
+
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::Pid;
@@ -6,6 +21,11 @@ use signal_hook::iterator::Signals;
 use std::env;
 use std::process::{Command, ExitCode};
 
+/// Entry point: spawns `<argv[1]> [argv[2..]]`, forwards signals, reaps
+/// zombies, and exits with the child's status.
+///
+/// Usage: `crabtainer-init <command> [args...]`. Exits `1` on wrong usage and
+/// `127` when the command cannot be spawned.
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 

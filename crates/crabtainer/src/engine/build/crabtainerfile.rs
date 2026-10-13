@@ -248,6 +248,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// Every instruction keyword parses into the right [`Instruction`].
     fn parses_all_instruction_types() {
         let content = "\
 DOWNLOAD ubuntu:latest AS ubuntu OVERRIDE
@@ -279,6 +280,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `DOWNLOAD` accepts the `ref AS alias` form.
     fn download_parses_ref_alias_syntax() {
         let parsed = Crabtainerfile::parse("DOWNLOAD ubuntu:latest AS ubuntu\n").unwrap();
         assert_eq!(
@@ -292,6 +294,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `DOWNLOAD` without the `AS <alias>` part is rejected.
     fn download_requires_as_keyword() {
         let err = Crabtainerfile::parse("DOWNLOAD ubuntu\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -303,6 +306,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `DOWNLOAD` requires an image reference argument.
     fn download_requires_url() {
         let err = Crabtainerfile::parse("DOWNLOAD\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -310,6 +314,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// Leading whitespace and tabs before keywords are tolerated.
     fn leading_whitespace_and_tabs_are_tolerated() {
         let parsed = Crabtainerfile::parse("   FROM alpine\n\tRUN ls\n  COPY a b\n").unwrap();
         assert_eq!(
@@ -326,6 +331,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `MEMORY_LIMIT` requires an argument.
     fn memory_limit_requires_argument() {
         let err = Crabtainerfile::parse("MEMORY_LIMIT\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -333,6 +339,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// Keywords are matched case-insensitively.
     fn keywords_are_case_insensitive() {
         let parsed = Crabtainerfile::parse("from ubuntu\ncopy a /b\nrun ls\n").unwrap();
         assert_eq!(
@@ -349,6 +356,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// Blank lines and `#` comments are skipped entirely.
     fn ignores_blank_lines_and_comments() {
         let content = "\n# header comment\nFROM alpine\n\n# another comment\nRUN true\n";
         let parsed = Crabtainerfile::parse(content).unwrap();
@@ -356,12 +364,14 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// An empty or comment-only file yields no instructions.
     fn empty_file_yields_no_instructions() {
         let parsed = Crabtainerfile::parse("\n  \n# only a comment\n").unwrap();
         assert!(parsed.instructions.is_empty());
     }
 
     #[test]
+    /// Unknown keywords report the offending line number.
     fn unknown_keyword_reports_line_number() {
         let err = Crabtainerfile::parse("FROM alpine\nMAYBE ls\n").unwrap_err();
         assert!(err.contains("Line 2"), "unexpected error: {}", err);
@@ -369,6 +379,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `FROM` requires an image name.
     fn from_requires_argument() {
         let err = Crabtainerfile::parse("FROM\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -376,6 +387,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `COPY` requires exactly two arguments.
     fn copy_requires_exactly_two_arguments() {
         let err = Crabtainerfile::parse("COPY only_one\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -387,6 +399,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `RUN` requires a command.
     fn run_requires_argument() {
         let err = Crabtainerfile::parse("RUN\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -394,6 +407,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `CMD` requires an argument.
     fn cmd_requires_argument() {
         let err = Crabtainerfile::parse("CMD\n").unwrap_err();
         assert!(err.contains("Line 1"));
@@ -401,6 +415,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `RUN` keeps the whole command line together, including spaces.
     fn preserves_run_command_including_spaces() {
         let parsed = Crabtainerfile::parse("RUN apk add --no-cache curl && echo done\n").unwrap();
         assert_eq!(
@@ -412,6 +427,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `parse_from_file` reads and parses an on-disk Crabtainerfile.
     fn parse_from_file_reads_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("Crabtainerfile");
@@ -425,12 +441,14 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `parse_from_file` errors clearly when the file is missing.
     fn parse_from_file_missing_file_errors() {
         let err = Crabtainerfile::parse_from_file("/does/not/exist/Crabtainerfile").unwrap_err();
         assert!(err.contains("Error reading file"));
     }
 
     #[test]
+    /// `CMD` splits its arguments on whitespace.
     fn cmd_splits_command_and_args() {
         let parsed = Crabtainerfile::parse("CMD /bin/sh -c echo hello\n").unwrap();
         assert_eq!(
@@ -447,6 +465,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `CMD ls` keeps the single word as the only argument.
     fn cmd_with_single_word_has_empty_args() {
         let parsed = Crabtainerfile::parse("CMD ls\n").unwrap();
         assert_eq!(
@@ -458,6 +477,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `CMD` splits on runs of any whitespace.
     fn cmd_splits_on_all_whitespace() {
         let parsed = Crabtainerfile::parse("CMD   python3   -m   http.server\n").unwrap();
         assert_eq!(
@@ -473,6 +493,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `CPU_LIMIT` parses valid core counts and rejects invalid ones.
     fn cpu_limit_parses_and_validates() {
         let parsed = Crabtainerfile::parse("CPU_LIMIT 1.5\n").unwrap();
         assert_eq!(parsed.instructions, vec![Instruction::CpuLimit(1.5)]);
@@ -489,6 +510,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `MEMORY_LIMIT` records the raw value for later parsing.
     fn memory_limit_parses_and_records_raw_value() {
         let parsed = Crabtainerfile::parse("MEMORY_LIMIT 2g\n").unwrap();
         assert_eq!(
@@ -498,6 +520,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// Invalid `MEMORY_LIMIT` values are rejected with the line number.
     fn memory_limit_validates_value() {
         let err = Crabtainerfile::parse("MEMORY_LIMIT not-a-size\n").unwrap_err();
         assert!(err.contains("Line 1"), "unexpected error: {}", err);
@@ -509,6 +532,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `parse_memory_limit` converts every supported unit suffix.
     fn parse_memory_limit_handles_units() {
         assert_eq!(parse_memory_limit("512m").unwrap(), 512.0 * 1024.0 * 1024.0);
         assert_eq!(
@@ -521,6 +545,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `parse_memory_limit` treats uppercase suffixes the same as lowercase.
     fn parse_memory_limit_is_case_insensitive() {
         assert_eq!(
             parse_memory_limit("2G").unwrap(),
@@ -533,6 +558,7 @@ CMD /bin/sh -c
     }
 
     #[test]
+    /// `parse_memory_limit` rejects empty or unparseable values.
     fn parse_memory_limit_rejects_invalid_values() {
         assert!(parse_memory_limit("").is_err());
         assert!(parse_memory_limit("abc").is_err());

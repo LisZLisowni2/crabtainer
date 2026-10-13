@@ -1,3 +1,12 @@
+//! Container lifecycle: spawn, run, and teardown.
+//!
+//! This module is the heart of the runtime. It sets up the overlay rootfs,
+//! mounts pseudo-filesystems and volumes, creates the kernel namespaces
+//! (UTS, PID, mount, network), applies cgroup limits, attaches networking,
+//! pivots the root, and finally execs the container command through
+//! `/dev/.crabtainer_init`. Both foreground ([`run_container`]) and detached
+//! ([`spawn_detach_container`]) execution live here.
+
 use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::runtime::network::{Ipam, NetworkManager};
 use crate::engine::runtime::options::{ContainerOptions, ContainerStatus};
@@ -20,6 +29,10 @@ use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 
+/// Generates a random 12-character lowercase hex container id.
+///
+/// Six random bytes formatted as hex give a 48-bit identifier, which is the
+/// default container name and directory name under the runtime dir.
 pub fn generate_container_id() -> String {
     let mut rng = rand::rng();
 
@@ -28,6 +41,8 @@ pub fn generate_container_id() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+/// Picks the command to run: explicit CLI arguments win, otherwise the
+/// layout's default arguments are used.
 fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     if args.is_empty() {
         layout_args.to_vec()
@@ -36,6 +51,9 @@ fn resolve_args(args: &[String], layout_args: &[String]) -> Vec<String> {
     }
 }
 
+/// Resolves the CPU quota to enforce: the CLI limit (in cores) wins and is
+/// converted to a quota in µs against a 100 ms period; otherwise the layout's
+/// quota is used, defaulting to one full period (100000).
 fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> i64 {
     if let Some(cpu) = cpu_limit {
         (*cpu as i64) * 100000i64
@@ -44,6 +62,10 @@ fn resolve_cpu_limit(cpu_limit: &Option<f64>, layout_cpu_limit: Option<i64>) -> 
     }
 }
 
+/// Recursively copies the directory tree `src` into `dst`.
+///
+/// Creates `dst` first, then copies every regular file and subdirectory below
+/// it, mirroring the structure. Symlinks and other entry types are skipped.
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
     fs::create_dir_all(&dst)?;
 
@@ -61,6 +83,8 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
     Ok(())
 }
 
+/// Resolves the memory limit to enforce: the CLI limit (in bytes) wins,
+/// otherwise the layout's limit is used, defaulting to 1 GiB.
 fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<i64>) -> i64 {
     if let Some(memory) = memory_limit {
         *memory as i64
@@ -69,6 +93,28 @@ fn resolve_memory_limit(memory_limit: &Option<f64>, layout_memory_limit: Option<
     }
 }
 
+/// Spawns a container in the background (detached mode, `-d`).
+///
+/// The container is double-forked: an intermediate child is placed in a new
+/// session (`setsid`), its stdio is redirected from the host's
+/// `container.log` file, and a grandchild executes the container. The
+/// intermediate child — mirrored as a fork inside a blocking thread — waits
+/// for the container, then tears it down: removes port-forwarding rules,
+/// deletes the cgroup, unmounts the overlay, and (with `--rm`) deletes the
+/// container directory.
+///
+/// A runtime `config.json` is written with the container marked `Active`,
+/// and the network bridge/IPAM are set up before the process is spawned.
+///
+/// # Arguments
+///
+/// * `opts` - Full user-supplied container options.
+/// * `container_id` - Generated container id (also its directory name).
+///
+/// # Errors
+///
+/// Fails if the layout is missing, networking/IPAM setup fails, or any mount
+/// or spawn step errors.
 pub async fn spawn_detach_container(
     opts: ContainerOptions,
     container_id: String,
@@ -573,6 +619,24 @@ pub async fn spawn_detach_container(
     Ok(())
 }
 
+/// Runs a container in the foreground, blocking until it exits.
+///
+/// Mirrors [`spawn_detach_container`]'s setup (network, IPAM, overlay
+/// mounts, volumes, `/dev/.crabtainer_init`, cgroups, namespaces) but keeps
+/// stdio attached to the caller. On exit the container's port forwarding,
+/// cgroup, and overlay mount are cleaned up, `config.json` is updated with
+/// the final status, and the container directory is removed when `--rm` is
+/// set.
+///
+/// # Arguments
+///
+/// * `opts` - Full user-supplied container options.
+/// * `container_id` - Generated container id (also its directory name).
+///
+/// # Errors
+///
+/// Returns an error string if the layout is missing, networking/IPAM setup
+/// fails, the contained process errors, or any mount/spawn step fails.
 pub async fn run_container(opts: ContainerOptions, container_id: String) -> Result<(), String> {
     const STACK_SIZE: usize = 5 * 1024 * 1024; // 5 MB
     let layout_dir = CrabtainerPaths::layout_store_dir().join(&opts.layout_name);
@@ -940,6 +1004,11 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
     Ok(())
 }
 
+/// Child-process entry point for detached containers.
+///
+/// Unlike [`child_process`] it first blocks on the `sync_raw_fd` pipe until
+/// the parent signals (after `config.json` and network setup) that it may
+/// continue, then delegates to [`child_process`].
 fn detach_child_process(
     rootfs: &Path,
     container_id: &String,
@@ -960,6 +1029,18 @@ fn detach_child_process(
     child_process(rootfs, container_id, options)
 }
 
+/// The cloned child that becomes PID 1 inside the container.
+///
+/// Runs inside the fresh namespaces and performs the container setup:
+///
+/// 1. sets the container hostname,
+/// 2. makes the mount namespace private and bind-mounts the rootfs,
+/// 3. `pivot_root`s into the rootfs and unmounts/removes the old root,
+/// 4. chdirs into the workdir and writes `resolv.conf`,
+/// 5. `execve`s `/dev/.crabtainer_init` with the container's args and envs.
+///
+/// Returns the process exit code (`0`) — the actual `execve` replaces the
+/// process image, so this is only reached on failure paths.
 fn child_process(
     rootfs: &Path,
     container_id: &String,
@@ -1068,6 +1149,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// `generate_container_id` produces 12 lowercase hex characters.
     fn generate_container_id_is_12_lowercase_hex_chars() {
         for _ in 0..100 {
             let id = generate_container_id();
@@ -1077,6 +1159,7 @@ mod tests {
     }
 
     #[test]
+    /// Generated ids are unique across many samples.
     fn generate_container_ids_are_unique() {
         let mut seen = std::collections::HashSet::new();
         for _ in 0..1000 {
@@ -1089,17 +1172,20 @@ mod tests {
     }
 
     #[test]
+    /// Empty CLI args fall back to the layout args.
     fn resolve_args_layout_args_when_command_args_empty() {
         let layout_args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(resolve_args(&Vec::new(), &layout_args), vec!["-lh"]);
     }
 
     #[test]
+    /// Both empty arg sources yield an empty result.
     fn resolve_args_empty_layout_args_and_empty_command_args() {
         assert!(resolve_args(&Vec::new(), &Vec::new()).is_empty());
     }
 
     #[test]
+    /// Provided CLI args take precedence over layout args.
     fn resolve_args_prefers_provided_args() {
         let args: Vec<String> = vec!["-lh".to_string()];
         assert_eq!(
@@ -1109,41 +1195,49 @@ mod tests {
     }
 
     #[test]
+    /// `resolve_cpu_limit` converts a CLI core count to a quota.
     fn resolve_cpu_limit_uses_cli_quota_when_given() {
         assert_eq!(resolve_cpu_limit(&Some(2.0), None), 200000);
     }
 
     #[test]
+    /// Without a CLI limit the layout quota is used.
     fn resolve_cpu_limit_uses_layout_quota_when_no_cli() {
         assert_eq!(resolve_cpu_limit(&None, Some(50000)), 50000);
     }
 
     #[test]
+    /// Without any limit a full 100000 µs period is used.
     fn resolve_cpu_limit_defaults_when_nothing_given() {
         assert_eq!(resolve_cpu_limit(&None, None), 100000);
     }
 
     #[test]
+    /// A CLI limit wins over the layout quota.
     fn resolve_cpu_limit_cli_takes_precedence_over_layout() {
         assert_eq!(resolve_cpu_limit(&Some(2.0), Some(50000)), 200000);
     }
 
     #[test]
+    /// `resolve_memory_limit` uses the CLI value when given.
     fn resolve_memory_limit_uses_cli_limit_when_given() {
         assert_eq!(resolve_memory_limit(&Some(512.0), None), 512);
     }
 
     #[test]
+    /// Without a CLI limit the layout memory limit is used.
     fn resolve_memory_limit_uses_layout_limit_when_no_cli() {
         assert_eq!(resolve_memory_limit(&None, Some(1024)), 1024);
     }
 
     #[test]
+    /// Without any limit 1 GiB is used.
     fn resolve_memory_limit_defaults_when_nothing_given() {
         assert_eq!(resolve_memory_limit(&None, None), 1024 * 1024 * 1024);
     }
 
     #[test]
+    /// A CLI limit wins over the layout memory limit.
     fn resolve_memory_limit_cli_takes_precedence_over_layout() {
         assert_eq!(resolve_memory_limit(&Some(512.0), Some(1024)), 512);
     }

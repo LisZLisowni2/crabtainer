@@ -1,12 +1,43 @@
+//! cgroup v2 resource control.
+//!
+//! Creates a per-container cgroup under the v2 hierarchy, writes CPU and
+//! memory limits, and attaches the container's root process to it.
+
 use crate::engine::runtime::options::ContainerReady;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// Sets up the container's cgroup under the standard v2 mount point
+/// (`/sys/fs/cgroup`).
+///
+/// Delegates to the private helper `setup_cgroups_in` — see there for
+/// details.
+///
+/// # Errors
+///
+/// Returns an error string if the cgroup directory or any limit file cannot
+/// be created or written.
 pub fn setup_cgroups(container_id: &str, opts: &ContainerReady) -> Result<PathBuf, String> {
     setup_cgroups_in(container_id, opts, Path::new("/sys/fs/cgroup"))
 }
 
+/// Creates the cgroup directory `<base>/<container_id>` and writes the
+/// requested limits into it.
+///
+/// - `memory.max` is written when `opts.memory_limit` is set.
+/// - `cpu.max` is written as `<quota>, 100000` when `opts.quota` is set.
+///
+/// # Arguments
+///
+/// * `container_id` - Container id used as the cgroup directory name.
+/// * `opts` - Resolved limits from [`ContainerReady`].
+/// * `base_dir` - Root of the cgroup hierarchy (injectable for tests).
+///
+/// # Errors
+///
+/// Returns an error string if the directory or any limit file cannot be
+/// written.
 fn setup_cgroups_in(
     container_id: &str,
     opts: &ContainerReady,
@@ -34,6 +65,18 @@ fn setup_cgroups_in(
     Ok(cgroup_dir)
 }
 
+/// Attaches a process to the container's cgroup by writing its PID to
+/// `cgroup.procs`.
+///
+/// # Arguments
+///
+/// * `cgroup_dir` - Path of the prepared cgroup directory.
+/// * `pid` - PID of the process to attach.
+///
+/// # Errors
+///
+/// Returns an error string for invalid PIDs (`<= 0`) or if the
+/// `cgroup.procs` file cannot be opened or written.
 pub fn attach_process_to_cgroup(cgroup_dir: &Path, pid: nix::unistd::Pid) -> Result<(), String> {
     let procs_file = cgroup_dir.join("cgroup.procs");
 
@@ -61,6 +104,7 @@ mod tests {
     use crate::engine::runtime::options::RestartPolicy;
     use tempfile::tempdir;
 
+    /// Builds a [`ContainerReady`] with the given CPU quota and memory limit.
     fn opts(cpu: Option<i64>, mem: Option<i64>) -> ContainerReady {
         ContainerReady {
             layout_name: "test".to_string(),
@@ -74,6 +118,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `setup_cgroups_in` writes memory and cpu limit files.
     async fn setup_writes_memory_and_cpu_limits() {
         let dir = tempdir().unwrap();
         let result =
@@ -90,6 +135,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Without limits only the cgroup directory is created.
     async fn setup_with_no_limits_only_creates_dir() {
         let dir = tempdir().unwrap();
         let result = setup_cgroups_in("empty-cgroup", &opts(None, None), dir.path()).unwrap();
@@ -99,6 +145,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Only the limits that are actually provided get written.
     async fn setup_writes_only_provided_limits() {
         let dir = tempdir().unwrap();
         let result = setup_cgroups_in("cpu-only", &opts(Some(200000), None), dir.path()).unwrap();
@@ -118,6 +165,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Attaching a non-positive PID is rejected.
     async fn attach_rejects_invalid_pid() {
         let dir = tempdir().unwrap();
         let err = attach_process_to_cgroup(dir.path(), nix::unistd::Pid::from_raw(0)).unwrap_err();
@@ -125,6 +173,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `attach_process_to_cgroup` writes the PID into `cgroup.procs`.
     async fn attach_writes_pid_to_cgroup_procs() {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("cgroup.procs"), "").unwrap();
@@ -136,6 +185,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Attaching to a directory without `cgroup.procs` reports the error.
     async fn attach_reports_missing_procs_file() {
         let dir = tempdir().unwrap();
         let err = attach_process_to_cgroup(dir.path(), nix::unistd::Pid::from_raw(1)).unwrap_err();

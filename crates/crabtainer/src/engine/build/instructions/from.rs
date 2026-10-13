@@ -1,6 +1,29 @@
+//! The `FROM` build step: unpacking a stored image into a layout.
+//!
+//! Combines the layer archives of a previously downloaded image into the
+//! layout's `rootfs/` directory in order, preserving permissions and xattrs,
+//! and copies the image's `config.json` alongside the layout.
+
 use crate::engine::support::paths::CrabtainerPaths;
 use std::path::PathBuf;
 
+/// Unpacks every layer of a stored image into the layout's rootfs.
+///
+/// The image must already exist in the local image store (i.e. a `DOWNLOAD`
+/// step ran first) and contain at least one `layer_*.tar.gz` archive.
+/// Layers are applied in index order onto `<base>/layouts/<layout>/rootfs/`;
+/// the image's `config.json` is copied to the layout directory.
+///
+/// # Arguments
+///
+/// * `base_image` - Alias of the image in the image store.
+/// * `output_layout_name` - Name of the layout being built.
+///
+/// # Errors
+///
+/// Returns an error string if the image is missing, contains no layers, or a
+/// layer cannot be read or unpacked. Individual non-fatal unpack issues are
+/// logged as warnings.
 pub async fn from_image(base_image: &String, output_layout_name: &String) -> Result<(), String> {
     let image_dir_name = base_image.replace("/", "_").replace(".", "_");
     let image_path = CrabtainerPaths::image_store_dir().join(&image_dir_name);
@@ -113,6 +136,7 @@ mod tests {
     use flate2::write::GzEncoder;
     use tar::Builder;
 
+    /// Builds an in-memory gzipped tar containing a single `rootfile.txt`.
     fn layer_tar_gz() -> Vec<u8> {
         let mut tar_gz = Vec::new();
         {
@@ -134,6 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `from_image` reports a clear error when the image is not in the store.
     async fn from_image_errors_when_image_missing() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_str().unwrap().to_string();
@@ -153,6 +178,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// `from_image` errors when the image has no layer archives.
     async fn from_image_errors_when_no_layers() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_str().unwrap().to_string();
@@ -176,6 +202,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Layers are unpacked into the layout rootfs and the config copied over.
     async fn from_image_extracts_layers_into_layout_rootfs() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().to_str().unwrap().to_string();

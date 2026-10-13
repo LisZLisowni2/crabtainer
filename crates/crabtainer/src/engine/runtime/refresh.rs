@@ -1,15 +1,29 @@
+//! Detecting and reconciling dead containers.
+//!
+//! Called before most CLI operations, this module marks containers whose
+//! process is gone (including after a host reboot) as exited, frees their
+//! IPAM leases, and unmounts their overlay rootfs.
+
 use crate::engine::runtime::network::Ipam;
 use crate::engine::runtime::options::{ContainerStatus, RuntimeConfig};
 use crate::engine::support::paths::CrabtainerPaths;
 use nix::unistd::Pid;
 use std::net::Ipv4Addr;
 
+/// Summary of what [`refresh_container_states`] changed.
 #[derive(Debug)]
 pub struct RefreshReport {
+    /// Container ids that were transitioned from `Active` to `Exited`.
     pub updated_containers: Vec<String>,
+    /// IP addresses freed as part of that transition.
     pub freed_ips: Vec<Ipv4Addr>,
 }
 
+/// Reads the current host boot id from
+/// `/proc/sys/kernel/random/boot_id`.
+///
+/// The boot id is persisted per container so stale PIDs can be detected after
+/// a reboot. Panics if the file cannot be read.
 pub fn save_boot_id() -> String {
     std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .expect("[ERROR] Failed to read /proc/sys/kernel/random/boot_id")
@@ -17,6 +31,11 @@ pub fn save_boot_id() -> String {
         .to_string()
 }
 
+/// Checks whether a container process with `pid` is still alive.
+///
+/// A PID is considered dead if it is `<= 0`, if the boot id it was recorded
+/// under differs from `current_boot_id` (i.e. the host rebooted), or if
+/// signalling it with a null signal fails with `ESRCH`.
 fn is_container_alive(pid: i32, saved_boot_id: Option<String>, current_boot_id: String) -> bool {
     if pid <= 0 {
         return false;
@@ -35,6 +54,22 @@ fn is_container_alive(pid: i32, saved_boot_id: Option<String>, current_boot_id: 
     }
 }
 
+/// Checks the runtime directory for containers marked `Active` whose process
+/// is no longer alive and reconciles them.
+///
+/// For each dead container this:
+///
+/// 1. writes `status = Exited` and `pid = 0` back to its `config.json`,
+/// 2. releases its IPAM lease and records the freed IP in the report,
+/// 3. detaches (unmounts) the container's merged overlay rootfs.
+///
+/// Containers without a readable config are skipped. Returns a
+/// [`RefreshReport`] summarizing the changes.
+///
+/// # Errors
+///
+/// Returns an error if the runtime directory cannot be enumerated or a
+/// config cannot be re-written.
 pub async fn refresh_container_states() -> Result<RefreshReport, Box<dyn std::error::Error>> {
     let current_boot_id = save_boot_id();
 
