@@ -204,6 +204,7 @@ crabtainer layout <ACTION>
 | `layout ps` | List built layouts with their sizes. |
 | `layout rm <TAG\|".">` | Remove a layout. Refuses when a container still uses it; `.` removes all unused layouts after confirmation. |
 | `layout inspect <TAG>` | Print the layout's OCI spec (`config.json`) in JSON. |
+| `layout publish <TAG>` | Convert layout to image. |
 
 ---
 

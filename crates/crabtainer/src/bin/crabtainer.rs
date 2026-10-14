@@ -236,6 +236,9 @@ enum LayoutActions {
         /// Specific tag name of layout
         tag: String,
     },
+
+    /// Convert layout to image
+    Publish { tag: String },
 }
 
 /// Entry point of the `crabtainer` binary.
@@ -553,6 +556,7 @@ async fn main() {
                     }
                 }
             }
+            LayoutActions::Publish { tag } => {}
             LayoutActions::Inspect { tag } => {
                 let store = CrabtainerPaths::layout_store_dir();
                 let config_path = store.join(tag).join("config.json");
