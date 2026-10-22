@@ -19,10 +19,12 @@ use crabtainer::engine::runtime::options::{
     ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig,
 };
 use crabtainer::engine::runtime::stop::stop_container;
+use crabtainer::engine::runtime::volume::VolumeConfig;
 use crabtainer::engine::support::paths::CrabtainerPaths;
 use getch_rs::Key;
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -184,6 +186,8 @@ enum VolumeActions {
     Ls,
     /// Remove a specific volume
     Remove { name: String },
+    /// Displays a details about volume
+    Inspect { name: String },
 }
 
 /// Subcommands for system-level crabtainer configuration.
@@ -200,7 +204,7 @@ enum SystemActions {
 #[derive(Subcommand)]
 enum ImageActions {
     /// List all images
-    Ps,
+    Ls,
 
     /// Remove a specific image
     Rm { name: String },
@@ -224,7 +228,7 @@ enum ImageActions {
 #[derive(Subcommand)]
 enum LayoutActions {
     /// List all layouts
-    Ps,
+    Ls,
 
     /// Remove specific layout
     Rm {
@@ -404,7 +408,7 @@ async fn main() {
                     .unwrap();
                 }
             }
-            ImageActions::Ps => {
+            ImageActions::Ls => {
                 let store = CrabtainerPaths::image_store_dir();
                 println!("{:<20} {:<15}", "ALIAS", "SIZE");
                 println!("{}", "-".repeat(38));
@@ -437,6 +441,16 @@ async fn main() {
             }
         },
         Commands::Volume { action } => match action {
+            VolumeActions::Inspect { name } => {
+                let store = CrabtainerPaths::volumes_dir().join(&name);
+
+                if let Ok(config_str) = fs::read_to_string(store.join("config.json"))
+                    && let Ok(config) = serde_json::from_str::<VolumeConfig>(&config_str)
+                    && let Ok(config_pretty) = serde_json::to_string_pretty(&config)
+                {
+                    println!("{}", config_pretty);
+                }
+            }
             VolumeActions::Prune => {}
             VolumeActions::Create { name } => {
                 let path = CrabtainerPaths::volumes_dir().join(&name);
@@ -572,7 +586,7 @@ async fn main() {
                     println!("{}", string_pretty);
                 }
             }
-            LayoutActions::Ps => {
+            LayoutActions::Ls => {
                 let store = CrabtainerPaths::layout_store_dir();
                 println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
                 println!("{}", "-".repeat(38));
