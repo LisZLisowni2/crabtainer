@@ -12,6 +12,7 @@
 
 use clap::{Parser, Subcommand};
 use crabtainer::engine::build::builder::build_layout;
+use crabtainer::engine::build::publish::publish_layout;
 use crabtainer::engine::runtime::container::{run_container, spawn_detach_container};
 use crabtainer::engine::runtime::exec::ExecOptions;
 use crabtainer::engine::runtime::options::{
@@ -556,7 +557,9 @@ async fn main() {
                     }
                 }
             }
-            LayoutActions::Publish { tag } => {}
+            LayoutActions::Publish { tag } => {
+                publish_layout(tag).await;
+            }
             LayoutActions::Inspect { tag } => {
                 let store = CrabtainerPaths::layout_store_dir();
                 let config_path = store.join(tag).join("config.json");

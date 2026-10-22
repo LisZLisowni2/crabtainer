@@ -11,6 +11,7 @@ use crate::engine::runtime::cgroups::{attach_process_to_cgroup, setup_cgroups};
 use crate::engine::runtime::network::{Ipam, NetworkManager};
 use crate::engine::runtime::options::{ContainerOptions, ContainerStatus};
 use crate::engine::runtime::refresh::save_boot_id;
+use crate::engine::runtime::volume::VolumeConfig;
 use crate::engine::support::paths::CrabtainerPaths;
 use nix::fcntl::OFlag;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
@@ -346,9 +347,24 @@ pub async fn spawn_detach_container(
                     };
 
                     if !is_bind_mount && fs::metadata(&volume_path).is_err() {
-                        fs::create_dir_all(&volume_path).expect("Failed to create volume site dir");
+                        fs::create_dir_all(volume_path.join("_data"))
+                            .expect("Failed to create volume site dir");
+
+                        let vol_config = VolumeConfig {
+                            name: splited[0].to_string(),
+                            creation_date: chrono::Utc::now(),
+                        };
+
+                        fs::write(
+                            &volume_path,
+                            serde_json::to_string_pretty(&vol_config)
+                                .unwrap()
+                                .as_bytes(),
+                        )
+                        .expect("Failed to write volume config file");
+
                         if fs::metadata(&container_path).is_ok() {
-                            copy_dir_all(&container_path, &volume_path)
+                            copy_dir_all(&container_path, volume_path.join("_data"))
                                 .expect("Failed to copy container dir to volume");
                         }
                     }
@@ -361,6 +377,7 @@ pub async fn spawn_detach_container(
                     mount(
                         Some(
                             volume_path
+                                .join("_data")
                                 .to_str()
                                 .expect("Failed to convert PathBuf to &str"),
                         ),
@@ -820,7 +837,9 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
                 .canonicalize()
                 .expect("Failed to canonicalize bind mount dir")
         } else {
-            CrabtainerPaths::volumes_dir().join(splited[0])
+            CrabtainerPaths::volumes_dir()
+                .join(splited[0])
+                .join("_data")
         };
 
         if !is_bind_mount && fs::metadata(&volume_path).is_err() {

@@ -6,8 +6,10 @@
 //!   each build step.
 //! - [`instructions`] — one module per build step (`DOWNLOAD`, `FROM`, `COPY`,
 //!   `RUN`).
+//!   [`publish`] - handles conversion from layout to image
 
 pub mod builder;
 pub mod crabtainerfile;
 pub mod instructions;
+pub mod publish;
 pub mod spec;
