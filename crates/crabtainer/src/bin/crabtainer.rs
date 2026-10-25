@@ -243,7 +243,13 @@ enum LayoutActions {
     },
 
     /// Convert layout to image
-    Publish { tag: String },
+    Publish {
+        /// Specific tag name of layout
+        tag: String,
+
+        /// Name for new image
+        name: String,
+    },
 }
 
 /// Entry point of the `crabtainer` binary.
@@ -410,8 +416,8 @@ async fn main() {
             }
             ImageActions::Ls => {
                 let store = CrabtainerPaths::image_store_dir();
-                println!("{:<20} {:<15}", "ALIAS", "SIZE");
-                println!("{}", "-".repeat(38));
+                println!("{:<30} {:<15}", "ALIAS", "SIZE");
+                println!("{}", "-".repeat(68));
                 std::fs::read_dir(&store).ok();
 
                 if let Ok(entries) = std::fs::read_dir(store) {
@@ -435,7 +441,7 @@ async fn main() {
                             std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                        println!("{:<30} {:<15} MB", name, size / 1024 / 1024);
                     }
                 }
             }
@@ -464,7 +470,7 @@ async fn main() {
             VolumeActions::Ls => {
                 let store = CrabtainerPaths::volumes_dir();
 
-                println!("{:<20} {:<15}", "VOLUME NAME", "SIZE");
+                println!("{:<30} {:<15}", "VOLUME NAME", "SIZE");
                 println!("{}", "-".repeat(38));
 
                 if let Ok(dir) = std::fs::read_dir(store) {
@@ -486,7 +492,7 @@ async fn main() {
                             std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{} {}", name.display(), size);
+                        println!("{:<30} {:<15} MB", name.display(), size / 1024 / 1024);
                     }
                 }
             }
@@ -571,8 +577,8 @@ async fn main() {
                     }
                 }
             }
-            LayoutActions::Publish { tag } => {
-                publish_layout(tag).await;
+            LayoutActions::Publish { tag, name } => {
+                publish_layout(tag, name).await;
             }
             LayoutActions::Inspect { tag } => {
                 let store = CrabtainerPaths::layout_store_dir();
@@ -588,17 +594,18 @@ async fn main() {
             }
             LayoutActions::Ls => {
                 let store = CrabtainerPaths::layout_store_dir();
-                println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
+                println!("{:<40} {:<15}", "LAYOUT TAG", "SIZE");
                 println!("{}", "-".repeat(38));
 
                 if let Ok(entries) = std::fs::read_dir(store) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        let name = path
-                            .file_stem()
-                            .unwrap()
-                            .to_string_lossy()
-                            .replace(".tar.gz", "");
+                        let path_clone = path.clone();
+                        let name = path_clone
+                            .file_name()
+                            .expect("[CRITICAL] Failed to gather file name.")
+                            .to_str()
+                            .expect("[CRITICAL] Failed to convert &OsStr to &str");
 
                         let size = if path.is_dir() {
                             WalkDir::new(path)
@@ -612,7 +619,7 @@ async fn main() {
                             std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                        println!("{:<40} {:<15} MB", name, size / 1024 / 1024);
                     }
                 }
             }

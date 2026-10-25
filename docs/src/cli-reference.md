@@ -188,7 +188,7 @@ crabtainer image <ACTION>
 
 ```bash
 sudo crabtainer image pull ubuntu:24.04 ubuntu
-sudo crabtainer image ps
+sudo crabtainer image ls
 ```
 
 ---
