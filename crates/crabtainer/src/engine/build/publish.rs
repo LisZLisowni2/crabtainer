@@ -3,6 +3,7 @@
 //! This module converts layout to image to use it as reusable component.
 
 use crate::engine::support::paths::CrabtainerPaths;
+use oci_spec::image::{ConfigBuilder, ImageConfigurationBuilder};
 
 pub async fn publish_layout(tag: String, name: String) {
     let store = CrabtainerPaths::layout_store_dir();
@@ -14,7 +15,11 @@ pub async fn publish_layout(tag: String, name: String) {
         .expect("[CRITICAL] Failed to convert PathBuf to &str");
     let image_path = image_store.join(name);
     let rootfs = path.join("rootfs");
-    if let Some(root) = rootfs.to_str() {
+
+    if let Ok(cfg_str) = std::fs::read_to_string(path.join("config.json"))
+        && let Ok(cfg) = serde_json::from_str::<oci_spec::image::Config>(&cfg_str)
+        && let Some(root) = rootfs.to_str()
+    {
         match tokio::process::Command::new("tar")
             .args(["-czvf", layer_save_path_str, root])
             .status()
@@ -46,8 +51,33 @@ pub async fn publish_layout(tag: String, name: String) {
             tokio::fs::remove_dir_all(&image_path)
                 .await
                 .expect("[CRITICAL] Failed to delete broken image");
+        } else {
+            let cfg_env = cfg
+                .env()
+                .clone()
+                .expect("[CRITICAL] Failed to retrieve cfg");
+            let cfg_cmd = cfg
+                .cmd()
+                .clone()
+                .expect("[CRITICAL] Failed to retrieve cmd");
+
+            let image_config = ImageConfigurationBuilder::default()
+                .config(
+                    ConfigBuilder::default()
+                        .env(cfg_env)
+                        .entrypoint(vec![])
+                        .cmd(cfg_cmd)
+                        .build()
+                        .expect("[CRITICAL] Failed to create config"),
+                )
+                .build()
+                .expect("[CRITICAL] Failed to create image spec");
+
+            image_config
+                .to_file_pretty(image_path.join("config.json"))
+                .expect("[CRITICAL] Failed to write image spec");
         }
     } else {
-        eprintln!("[CRITICAL] Failed to convert rootfs to &str");
+        eprintln!("[CRITICAL] Failed to convert rootfs to &str or open config file");
     }
 }
