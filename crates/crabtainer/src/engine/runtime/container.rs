@@ -356,7 +356,7 @@ pub async fn spawn_detach_container(
                         };
 
                         fs::write(
-                            &volume_path,
+                            volume_path.join("config.json"),
                             serde_json::to_string_pretty(&vol_config)
                                 .unwrap()
                                 .as_bytes(),
@@ -848,6 +848,19 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
                 copy_dir_all(&container_path, &volume_path)
                     .expect("Failed to copy container dir to volume");
             }
+
+            let vol_config = VolumeConfig {
+                name: splited[0].to_string(),
+                creation_date: chrono::Utc::now(),
+            };
+
+            fs::write(
+                volume_path.join("config.json"),
+                serde_json::to_string_pretty(&vol_config)
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .expect("Failed to write volume config file");
         }
 
         if fs::metadata(&container_path).is_err() {

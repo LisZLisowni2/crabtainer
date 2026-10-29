@@ -16,12 +16,17 @@ pub async fn publish_layout(tag: String, name: String) {
     let image_path = image_store.join(name);
     let rootfs = path.join("rootfs");
 
+    if tokio::fs::metadata(&image_path).await.is_ok() {
+        eprintln!("[ERROR] Image with that name already exists");
+        return;
+    }
+
     if let Ok(cfg_str) = std::fs::read_to_string(path.join("config.json"))
         && let Ok(cfg) = serde_json::from_str::<oci_spec::image::Config>(&cfg_str)
         && let Some(root) = rootfs.to_str()
     {
         match tokio::process::Command::new("tar")
-            .args(["-czvf", layer_save_path_str, root])
+            .args(["-czf", layer_save_path_str, root])
             .status()
             .await
         {
@@ -33,11 +38,6 @@ pub async fn publish_layout(tag: String, name: String) {
             Err(e) => {
                 eprintln!("[ERROR] Failed to execute `tar` command: {}", e)
             }
-        }
-
-        if tokio::fs::metadata(&image_path).await.is_ok() {
-            eprintln!("[ERROR] Image with that name already exists");
-            return;
         }
 
         tokio::fs::create_dir_all(&image_path)
@@ -52,20 +52,17 @@ pub async fn publish_layout(tag: String, name: String) {
                 .await
                 .expect("[CRITICAL] Failed to delete broken image");
         } else {
-            let cfg_env = cfg
-                .env()
-                .clone()
-                .expect("[CRITICAL] Failed to retrieve cfg");
-            let cfg_cmd = cfg
-                .cmd()
-                .clone()
-                .expect("[CRITICAL] Failed to retrieve cmd");
+            let cfg_env = cfg.env().clone().unwrap_or_default();
+
+            let cfg_cmd = cfg.cmd().clone().unwrap_or_default();
+
+            let cfg_entrypoint = cfg.entrypoint().clone().unwrap_or_default();
 
             let image_config = ImageConfigurationBuilder::default()
                 .config(
                     ConfigBuilder::default()
                         .env(cfg_env)
-                        .entrypoint(vec![])
+                        .entrypoint(cfg_entrypoint)
                         .cmd(cfg_cmd)
                         .build()
                         .expect("[CRITICAL] Failed to create config"),
