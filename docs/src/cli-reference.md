@@ -181,14 +181,14 @@ crabtainer image <ACTION>
 
 | Action | Description |
 | --- | --- |
-| `image ps` | List downloaded images with their sizes. |
+| `image ls` | List downloaded images with their sizes. |
 | `image pull <IMAGE> <ALIAS> [-o]` | Download an image from a registry (e.g. Docker Hub) under `<ALIAS>`. `-o, --overriding` replaces an existing image with the same alias. |
 | `image rm <NAME\|".">` | Remove an image; `.` removes all images after confirmation. |
 | `image inspect <NAME>` | Print the image config in JSON. |
 
 ```bash
 sudo crabtainer image pull ubuntu:24.04 ubuntu
-sudo crabtainer image ps
+sudo crabtainer image ls
 ```
 
 ---
@@ -201,9 +201,10 @@ crabtainer layout <ACTION>
 
 | Action | Description |
 | --- | --- |
-| `layout ps` | List built layouts with their sizes. |
+| `layout ls` | List built layouts with their sizes. |
 | `layout rm <TAG\|".">` | Remove a layout. Refuses when a container still uses it; `.` removes all unused layouts after confirmation. |
 | `layout inspect <TAG>` | Print the layout's OCI spec (`config.json`) in JSON. |
+| `layout publish <TAG>` | Convert layout to image. |
 
 ---
 
@@ -219,6 +220,7 @@ crabtainer volume <ACTION>
 | `volume ls` | List volumes and their sizes. |
 | `volume remove <NAME>` | Delete a volume directory. |
 | `volume prune` | **Not implemented** — currently a no-op stub. |
+| `volume inspect` | Print the volume's spec in JSON. |
 
 ---
 

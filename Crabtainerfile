@@ -1,7 +1,3 @@
-DOWNLOAD gentoo/stage3:20260817 AS gentoo
+FROM python-app-test-5
 
-FROM gentoo
-
-COPY Crabtainerfile /
-COPY Crabtainerfile /test/
-COPY * /test/entire_base/
+CMD ["uv", "run", "run.py"]

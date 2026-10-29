@@ -12,16 +12,19 @@
 
 use clap::{Parser, Subcommand};
 use crabtainer::engine::build::builder::build_layout;
+use crabtainer::engine::build::publish::publish_layout;
 use crabtainer::engine::runtime::container::{run_container, spawn_detach_container};
 use crabtainer::engine::runtime::exec::ExecOptions;
 use crabtainer::engine::runtime::options::{
     ContainerOptions, ContainerStatus, RestartPolicy, RuntimeConfig,
 };
 use crabtainer::engine::runtime::stop::stop_container;
+use crabtainer::engine::runtime::volume::VolumeConfig;
 use crabtainer::engine::support::paths::CrabtainerPaths;
 use getch_rs::Key;
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -183,6 +186,8 @@ enum VolumeActions {
     Ls,
     /// Remove a specific volume
     Remove { name: String },
+    /// Displays a details about volume
+    Inspect { name: String },
 }
 
 /// Subcommands for system-level crabtainer configuration.
@@ -199,7 +204,7 @@ enum SystemActions {
 #[derive(Subcommand)]
 enum ImageActions {
     /// List all images
-    Ps,
+    Ls,
 
     /// Remove a specific image
     Rm { name: String },
@@ -223,7 +228,7 @@ enum ImageActions {
 #[derive(Subcommand)]
 enum LayoutActions {
     /// List all layouts
-    Ps,
+    Ls,
 
     /// Remove specific layout
     Rm {
@@ -235,6 +240,15 @@ enum LayoutActions {
     Inspect {
         /// Specific tag name of layout
         tag: String,
+    },
+
+    /// Convert layout to image
+    Publish {
+        /// Specific tag name of layout
+        tag: String,
+
+        /// Name for new image
+        name: String,
     },
 }
 
@@ -400,10 +414,10 @@ async fn main() {
                     .unwrap();
                 }
             }
-            ImageActions::Ps => {
+            ImageActions::Ls => {
                 let store = CrabtainerPaths::image_store_dir();
-                println!("{:<20} {:<15}", "ALIAS", "SIZE");
-                println!("{}", "-".repeat(38));
+                println!("{:<30} {:<15}", "ALIAS", "SIZE");
+                println!("{}", "-".repeat(68));
                 std::fs::read_dir(&store).ok();
 
                 if let Ok(entries) = std::fs::read_dir(store) {
@@ -427,12 +441,22 @@ async fn main() {
                             std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                        println!("{:<30} {:<15} MB", name, size / 1024 / 1024);
                     }
                 }
             }
         },
         Commands::Volume { action } => match action {
+            VolumeActions::Inspect { name } => {
+                let store = CrabtainerPaths::volumes_dir().join(&name);
+
+                if let Ok(config_str) = fs::read_to_string(store.join("config.json"))
+                    && let Ok(config) = serde_json::from_str::<VolumeConfig>(&config_str)
+                    && let Ok(config_pretty) = serde_json::to_string_pretty(&config)
+                {
+                    println!("{}", config_pretty);
+                }
+            }
             VolumeActions::Prune => {}
             VolumeActions::Create { name } => {
                 let path = CrabtainerPaths::volumes_dir().join(&name);
@@ -446,7 +470,7 @@ async fn main() {
             VolumeActions::Ls => {
                 let store = CrabtainerPaths::volumes_dir();
 
-                println!("{:<20} {:<15}", "VOLUME NAME", "SIZE");
+                println!("{:<30} {:<15}", "VOLUME NAME", "SIZE");
                 println!("{}", "-".repeat(38));
 
                 if let Ok(dir) = std::fs::read_dir(store) {
@@ -468,7 +492,7 @@ async fn main() {
                             std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{} {}", name.display(), size);
+                        println!("{:<30} {:<15} MB", name.display(), size / 1024 / 1024);
                     }
                 }
             }
@@ -553,6 +577,9 @@ async fn main() {
                     }
                 }
             }
+            LayoutActions::Publish { tag, name } => {
+                publish_layout(tag, name).await;
+            }
             LayoutActions::Inspect { tag } => {
                 let store = CrabtainerPaths::layout_store_dir();
                 let config_path = store.join(tag).join("config.json");
@@ -565,19 +592,20 @@ async fn main() {
                     println!("{}", string_pretty);
                 }
             }
-            LayoutActions::Ps => {
+            LayoutActions::Ls => {
                 let store = CrabtainerPaths::layout_store_dir();
-                println!("{:<20} {:<15}", "LAYOUT TAG", "SIZE");
+                println!("{:<40} {:<15}", "LAYOUT TAG", "SIZE");
                 println!("{}", "-".repeat(38));
 
                 if let Ok(entries) = std::fs::read_dir(store) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        let name = path
-                            .file_stem()
-                            .unwrap()
-                            .to_string_lossy()
-                            .replace(".tar.gz", "");
+                        let path_clone = path.clone();
+                        let name = path_clone
+                            .file_name()
+                            .expect("[CRITICAL] Failed to gather file name.")
+                            .to_str()
+                            .expect("[CRITICAL] Failed to convert &OsStr to &str");
 
                         let size = if path.is_dir() {
                             WalkDir::new(path)
@@ -591,7 +619,7 @@ async fn main() {
                             std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
                         };
 
-                        println!("{:<20} {:<15} MB", name, size / 1024 / 1024);
+                        println!("{:<40} {:<15} MB", name, size / 1024 / 1024);
                     }
                 }
             }

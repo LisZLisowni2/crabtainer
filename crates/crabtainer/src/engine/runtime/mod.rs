@@ -12,6 +12,7 @@
 //! - [`start`] - start the stopped container
 //! - [`stop`] - stop the active container
 //! - [`options`] - specifications for container and restart policy
+//! - [`volume`] - volume's config struct
 
 pub mod autostart;
 pub mod cgroups;
@@ -22,3 +23,4 @@ pub mod options;
 pub mod refresh;
 pub mod start;
 pub mod stop;
+pub mod volume;

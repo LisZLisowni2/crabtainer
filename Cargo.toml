@@ -14,7 +14,7 @@ panic = "abort"
 
 [workspace.package]
 license = "Apache-2.0"
-version = "0.4.0-beta.1"
+version = "0.4.1"
 edition = "2024"
 authors = ["LisZLisowni2"]
 repository = "https://github.com/LisZLisowni2/crabtainer"
