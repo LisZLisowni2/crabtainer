@@ -960,6 +960,28 @@ pub async fn run_container(opts: ContainerOptions, container_id: String) -> Resu
         eprintln!("[WARN] Failed to attach network: {}", e);
     }
 
+    std::thread::spawn(move || {
+        let mut signals = signal_hook::iterator::Signals::new([
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGTERM,
+        ])
+        .expect("[CRITICAL] Failed to register signals");
+
+        for sig in signals.forever() {
+            let signal = match sig {
+                signal_hook::consts::SIGINT => Signal::SIGINT,
+                signal_hook::consts::SIGTERM => Signal::SIGTERM,
+                _ => continue,
+            };
+
+            println!("[HOST] Sending kill signal to child.");
+
+            if let Err(err) = nix::sys::signal::kill(child_pid, signal) {
+                eprintln!("[ERROR] Failed to send signal to child: {}", err);
+            };
+        }
+    });
+
     let is_error =
         tokio::task::spawn_blocking(move || match nix::sys::wait::waitpid(child_pid, None) {
             Ok(nix::sys::wait::WaitStatus::Exited(_, status)) => {
