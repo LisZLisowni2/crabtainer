@@ -59,7 +59,7 @@ pub fn exec_with_tty(
     let OpenptyResult { master, slave } = nix::pty::openpty(None, None)?;
 
     match unsafe { fork()? } {
-        ForkResult::Parent { child: _ } => {
+        ForkResult::Parent { child } => {
             drop(slave);
 
             enable_raw_mode()?;
@@ -97,24 +97,20 @@ pub fn exec_with_tty(
                     let _ = stdout.flush();
                 }
             });
-            //let mut status = 0;
-            //unsafe {
-            //    nix::libc::waitpid(child.as_raw(), &mut status, 0);
-            //}
+
+            let mut status = 0;
+
+            unsafe {
+                nix::libc::waitpid(child.as_raw(), &mut status, 0);
+            };
 
             disable_raw_mode()?;
-
             let _ = stdout_thread.join();
 
             Ok(0)
         }
         ForkResult::Child => {
             drop(master);
-            let _ = setsid();
-
-            unsafe {
-                nix::libc::ioctl(slave.as_raw_fd(), nix::libc::TIOCSCTTY, 0);
-            }
 
             join_namespaces(container_pid);
 
@@ -130,6 +126,12 @@ pub fn exec_with_tty(
                     Ok(status)
                 }
                 ForkResult::Child => {
+                    let _ = setsid();
+
+                    unsafe {
+                        nix::libc::ioctl(slave.as_raw_fd(), nix::libc::TIOCSCTTY, 0);
+                    };
+
                     dup2_stdin(slave.as_fd())?;
                     dup2_stdout(slave.as_fd())?;
                     dup2_stderr(slave.as_fd())?;
@@ -208,6 +210,23 @@ pub fn exec_with_pipes(
                     c_args.push(CString::new(arg.as_str())?);
                 }
             }
+
+            // let signals = signal_hook::iterator::Signals::new([
+            //     signal_hook::consts::SIGINT,
+            //     signal_hook::consts::SIGTERM,
+            // ])
+            // .expect("[CRITICAL] Failed to register signals");
+
+            // std::thread::spawn(move || {
+            //     for sig in signals.forever() {
+            //         let signal = match sig {
+            //             signal_hook::consts::SIGINT => Signal::SIGINT,
+            //             signal_hook::consts::SIGTERM => Signal::SIGTERM,
+            //         }
+
+            //
+            //     }
+            // })
 
             match execvp(&c_cmd, &c_args) {
                 Ok(_) => unreachable!(),
